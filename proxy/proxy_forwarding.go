@@ -19,31 +19,27 @@ type ClientControlMsg struct {
 	Remote []byte
 }
 
+// 	TODO：握手后全程都需要时间戳校验通信延迟吗？需不需要像 FTP 一样建立两条连接？一条数据连接，一条控制连接。
 /*
-	TODO：握手后全程都需要时间戳校验通信延迟吗？
-		  需不需要像 FTP 一样建立两条连接？一条数据连接，一条控制连接。
+	The first byte of control packet is defined as 0xAB or 0xCD.
 
-转发中途为了能让代理客户端识别传输的报文是数据还是通信反馈，在此定义转发报文格式
+		0xAB - the packet is for certain application.
+		0xCD - the packet is proxy response
 
-	客户端解密后第一个字节限定为 0xAB 或 0xCD。
+	The second byte is set to 0xCA.
+	Reminder byte is used for datagram or response payload.
 
-		为 0xAB 时标识这是一个提供给上层应用的数据包。
-		为 0xCD 时则为通信反馈。
+param:
 
-	第二字节限定为 0xCA
-	之后接报文或者通信反馈信息。
-
-参数：
-
-	payload: remote server 的数据或者通信反馈
-	attr: 用于控制 header 格式的单个字符。`F` 代表这个包是通信反馈，`D` 则代表这个包是数据包。用于给客户端拦截处理传回。
+	payload: remote server data or proxy response.
+	attr: used for identify the type of header. `F` as response Feedback，`D` as Data.
 */
 func WrapWithHeader(payload []byte, attr rune) []byte {
 	var header []byte
 	switch attr {
-	case 'F': // 反馈报文(proxyFeedback)
+	case 'F':
 		header = append(header, 0xAB)
-	case 'D': // 数据包(Data)
+	case 'D':
 		header = append(header, 0xCD)
 	}
 	header = append(header, 0xCA)
@@ -51,16 +47,15 @@ func WrapWithHeader(payload []byte, attr rune) []byte {
 }
 
 /*
-控制报文解析
+resolve command
 
-	报文：24字节命令与其余 payload
-	返回 错误。形式 xxxx error:
-		其中 fatal error 需要中断连接。
+	packet : (command, payload) ~ (24 bytes, ? )
+	return: xxxx error:
+		fatal or unexpected error should immediately abort connection.
 */
 func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
-	/* 有的控制报文不需要后续的操作。 */
 	switch string(payload[:protocol.CMD_PAYLOAD_LEN]) {
-	/* 更换 sessionkey。失败则终止连接。*/
+	/* change sessionkey. Abort connection once unable to maintain encrypted connection.*/
 	case protocol.CMD_refresh_sessionkey:
 		if len(payload[protocol.CMD_PAYLOAD_LEN:]) != cryptoprotect.KeySize+cryptoprotect.IVSize {
 			return errors.New(`fatal error: malicious payload for altering key-iv`)
@@ -95,15 +90,14 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 			return errors.New(`warning: malicious payload`)
 		}
 		/*
-			TODO: 将传给当前端口的报文丢弃，避免形成自环。
-			但是如果以后想做 p2p，如果有报文指向自身，就区分不开是中继还是恶意的构造攻击。
+			TODO: avoid self-looping by certain algorithm.
 				.-> . -> .
 					^	 |
 					|	 v
 					. <- .
-			考虑一下解决策略？
+			What is the final solution ?
 		*/
-		_, err := ep.EncWrite2Client([]byte(protocol.RESP_recv_server_addrp)) // 发这个≠代理认可
+		_, err := ep.EncWrite2Client([]byte(protocol.RESP_recv_server_addrp)) // send ≠ acknowledge
 		if err != nil {
 			return defErr.DescribeThenConcat(`fatal error:`, err)
 		}
@@ -124,28 +118,26 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 			}
 			return nil
 		}
-		/* 无法连接到远端服务器 */
+		/* unable to connect to remote server */
 		_, err1 := ep.EncWrite2Client([]byte(protocol.RESP_fail2_conn2server))
 		if err1 != nil {
 			return defErr.DescribeThenConcat(`fatal error:`, err1)
 		}
-		ep.remote_info = nil // 无效就清空
+		ep.remote_info = nil // clean if invalid
 		return defErr.DescribeThenConcat(`remote connection failed error:`, err)
-
-		/* 下一步发数据报文形成转发。转发过程视抛出错误程度决定恢复到何一状态。 */
 
 	}
 	return errors.New(`unsupported control type`)
 }
 
 /*
-尝试连接到远程服务器
+attempt to set up connection with remote server
 
-	返回 错误
+	return error
 */
 func (ep *EncFlowProxy) TryConnRemote(msg *ClientControlMsg) error {
 	server_addr, recommend_protocol, err := utils.CheckAddrType(string(msg.Remote) + `:` + string(msg.Rport[:]))
-	if err != nil { // 这个包发过来的服务器地址有错 | 恶意的 client |  通信被劫持篡改
+	if err != nil {
 		return errors.New(`can not connect with remote server due to` + err.Error())
 	}
 
@@ -160,13 +152,13 @@ func (ep *EncFlowProxy) TryConnRemote(msg *ClientControlMsg) error {
 }
 
 /*
-解析命令。命令形如
+command is in the shape of
 
 	+--+--+----+--------------------------------+...
 	|DC|CA|leng| payload
 	+--+--+----+--------------------------------+...
-	返回 错误。形式 xxxx error:
-	其中 `fatal error` 需要中断与客户端的连接。
+	return xxxx error if there is indeed an error:
+	Abort connection if the error is `fatal error` or `unexpected error`
 */
 func (ep *EncFlowProxy) CmdParser() error {
 	packet, cnt, err := ep.DecReadViaClient()
@@ -180,7 +172,7 @@ func (ep *EncFlowProxy) CmdParser() error {
 		return errors.New(`fatal error: fraud version`)
 	}
 	if attr != 0xDC {
-		return errors.New(`unexpected error: unsupported format`) // 异常的包
+		return errors.New(`unexpected error: unsupported format`)
 	}
 	if nxt_len < 24 || nxt_len > 65540 /* 2 + 2 + 65536 */ {
 		return errors.New(`fatal error: fake cmd-packet detected from invalid nxt-len`)
@@ -189,13 +181,15 @@ func (ep *EncFlowProxy) CmdParser() error {
 }
 
 /*
-转发流程如图所示。TODO：错误控制与测试。
+TODO：Test all of the logic。
 
-	返回读错误和写错误。
-	client            proxy             server
-		sp+----> rp-----┐  ┌-- rp<------- sp
-					 ┌--+--┘
-		rp<----+ sp<-┘  └----> sp-------> rp
+set up data path as figure shown.
+
+	return read error and write error
+	    client            proxy             server
+	        sp+----> rp-----┐  ┌-- rp<------- sp
+	                     ┌--+--┘
+	        rp<----+ sp<-┘  └----> sp-------> rp
 */
 func (ep *EncFlowProxy) FlowForwarding() (error, error) {
 	err_ch := make(chan error)
@@ -206,7 +200,7 @@ func (ep *EncFlowProxy) FlowForwarding() (error, error) {
 }
 
 /*
-TODO: 函数需经充分测试。
+TODO: Test all of the logic.
 */
 func (ep *EncFlowProxy) Stage2Emulator() {
 	defer ep.Remote.CloseAll()
@@ -217,14 +211,11 @@ recontrol:
 		switch err.Error()[0] {
 		case 'f':
 			fallthrough
-		case 'u': /* 这里的错误不好恢复，需要退出。*/
+		case 'u':
 			fallthrough
 		default:
 			return
-			/*
-				需要评估下一句的做法
-				goto recontrol
-			*/
+			// goto recontrol
 		}
 	}
 
@@ -234,13 +225,13 @@ recontrol:
 		if r2cerr == nil && c2rerr == nil {
 			continue
 		}
-		if c2rerr != nil { // 客户端在转发中途挂了。直接关闭所有连接。
+		if c2rerr != nil { // client is down, just abort connection.
 			return
 		}
 		if r2cerr != nil {
 			ep.Remote.CloseAll()
 			ep.EncWrite2Client(WrapWithHeader([]byte(`remote server error: `+r2cerr.Error()), 'F'))
-			goto recontrol // 需重新通过控制报文建立通信。
+			goto recontrol // reset remote connect.
 		}
 
 	}

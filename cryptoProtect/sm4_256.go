@@ -19,8 +19,8 @@ type SM4_CTR struct {
 }
 
 func (s *SM4_OFB) FlipFlow(msg []byte) []byte {
-	key := [KeySize]byte{}
-	for i := 0; i < KeySize; i++ {
+	key := [IVSize]byte{}
+	for i := 0; i < IVSize; i++ {
 		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
 	}
 	block, err := sm4.NewCipher(key[:])
@@ -36,7 +36,7 @@ func (s *SM4_OFB) FlipFlow(msg []byte) []byte {
 func (s *SM4_CTR) FlipFlow(msg []byte) []byte {
 	key := [IVSize]byte{}
 	for i := 0; i < IVSize; i++ {
-		key[i] = uint8((s.Key[i] + s.Key[KeySize-i]) & 0xFF)
+		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
 	}
 	block, err := sm4.NewCipher(key[:])
 	if err != nil {

@@ -56,8 +56,8 @@ func (ef *ExitFlag) SafeFilpState() {
 }
 
 var (
-	LocalInterceptor net.Listener // 全局信源
-	LocalClient      Client       // 凭此寻找代理
+	LocalInterceptor net.Listener // message source
+	LocalClient      Client       // might be used as local flow-proxy entity in the future
 	JudExitFlag      ExitFlag     = ExitFlag{ExitFlag: false, RWLock: new(sync.RWMutex)}
 )
 
@@ -67,22 +67,18 @@ func (c *Client) InitChannel() {
 	c.wNeedBytes = make(chan []byte)
 }
 
-// panic 或者处理完其它确定整套程序不用而正常退出时再用。
 func (c *Client) DeleteChannel() {
 	close(c.rDoneSignal)
 	close(c.wNotifiedSignal)
 	close(c.wNeedBytes)
 }
 
-// 会话使用 ZUC 流密码加密。加密本地的信息传给代理解密。
 func (c *Client) EncWrite(plaintext []byte) (uint, error) {
 	enc := c.StreamCipher.FlipFlow(plaintext)
-	// enc := cryptoprotect.ZUCFlipFlow(plaintext, c.Key[:], c.Iv[:])
 	cnt, err := c.MiProxy.Write(enc)
 	return cnt, err
 }
 
-// 会话使用流密码加密。解密代理传回的加密内容
 func (c *Client) DecRead() ([]byte, uint, error) {
 	enc, cnt, err := c.MiProxy.Read()
 	if cnt == 0 || err != nil {
@@ -93,10 +89,11 @@ func (c *Client) DecRead() ([]byte, uint, error) {
 }
 
 func (c *Client) sendPub() error {
-	key := make([]byte, 65)
+	key_len := c.AsymmCipher.GetPubLen()
+	key := make([]byte, key_len)
 	c.AsymmCipher.GetPub(&key)
 	cnt, err := c.MiProxy.Write(key)
-	if cnt != 65 {
+	if uint64(cnt) != key_len {
 		err = defErr.DescribeThenConcat(`client sending failure`, err)
 	}
 	return err

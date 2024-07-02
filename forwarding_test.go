@@ -61,7 +61,7 @@ func TestForwarding(t *testing.T) {
 	ep.Client.Conn = <-ch_conn
 	listener := <-ch_listen
 
-	defer ep.Client.CloseAll() // 当前函数执行完/执行出错后要保证退出
+	defer ep.Client.CloseAll()
 	defer c.MiProxy.CloseAll()
 	defer listener.Close()
 	go func() {
@@ -96,8 +96,8 @@ func TestForwarding(t *testing.T) {
 		curr_cmd := client.CmdHeaderWrapper(append([]byte(protocol.CMD_refresh_sessionkey), key...))
 		c.EncWrite(curr_cmd)
 
-		// 往下应该检验密钥更换后的对话。
+		// TODO: Add more tests
 	}()
 
-	ep.Stage2Emulator() // 事实上当从该函数返回时，连接就已经无效了。
+	ep.Stage2Emulator() // connection is aborted once return from this function
 }

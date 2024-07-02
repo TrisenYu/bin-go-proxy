@@ -16,9 +16,8 @@ import (
 const letters string = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZCXVBNM"
 
 /*
-比较两字节串是否一致。相同返回真，否则鉴定为假。
-
-	风险：时间的侧信道攻击。规避侧信道攻击 => 性能下降。
+compare whether two byte slices are the same.
+return true, `ok` if true, otherwise return false and the reason.
 */
 func CompareByteArrEQ(a []byte, b []byte) (bool, string) {
 	if len(a) != len(b) {
@@ -33,9 +32,7 @@ func CompareByteArrEQ(a []byte, b []byte) (bool, string) {
 }
 
 /*
-生成指定范围内的伪随机数。
-
-	如 1024~65535 范围内的端口包括注册端口（1024 - 49151）和动态或私有端口（49152 - 65535）。
+generate pseudo-random number between assigned parameter `min` and assigned parameter `max`.
 */
 func generateRandomNumber(min int, max int) int {
 	rand.New(rand.NewSource(time.Now().Unix()))
@@ -45,9 +42,9 @@ func generateRandomNumber(min int, max int) int {
 /*
 Deprecated
 
-参数 `tester` 必须是 `[ipv6]:port` 或 `ipv4:port` 或 `domain:port` 的形式.
+	 `tester` must be in the shape like `[ipv6]:port` or `ipv4:port` or `domain:port`.
 
-	return: conn-dst:port, recommend-protocol err
+		return: conn-dst:port, recommend-protocol err
 */
 func CheckAddrType(tester string) (string, string, error) {
 	if len(tester) == 0 {
@@ -64,7 +61,7 @@ func CheckAddrType(tester string) (string, string, error) {
 	return tcpAddr.IP.String(), "tcp", nil
 }
 
-// 生成伪随机字符串
+// generate pseudo-random string
 func GenerateEnterableRandomString(lena int64) string {
 	rand.New(rand.NewSource(lena))
 	res := make([]byte, lena)
@@ -117,7 +114,12 @@ func BytesToUint64(inp [8]byte) (res uint64) {
 	return
 }
 
-/* 0.5 到 0.6 的概率划分字节串为两段。用于联锁握手。 */
+/*
+Interlocking
+
+	The function accepts a byte slice as its sole input and
+	divides it into two-byte slices with a probability between 0.5 and 0.6 .
+*/
 func BytesSpliterInHalfChanceField(a []byte) ([]byte, []byte) {
 	lena := len(a)
 	if lena < 1 {
@@ -143,7 +145,7 @@ func MinInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~in
 	return b
 }
 
-// 获取程序执行的绝对路径
+// get absolute path of current file
 func GetRunPath() (string, error) {
 	path, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	return path, err
@@ -153,7 +155,7 @@ func GetFilePath(inp string) (string, error) {
 	return filepath.Abs(filepath.Dir(inp))
 }
 
-// 调试函数。输出字节串的十六进制。
+// debug function used for dumping hex representation of a byte slice.
 func BytesHexForm(inp []byte) {
 	if len(inp) == 0 {
 		log.Println(0)

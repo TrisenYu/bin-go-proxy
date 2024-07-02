@@ -453,7 +453,7 @@ func (c *Client) shakeHandReadCoroutine() (rerr error) {
 
 func (c *Client) shakeHandWriteCoroutine() (werr error) {
 	/* todo:  token */
-	werr = c.SendClientHelloPayload(`sm2`, `zuc`, `blake2s256`, `hello world, bed`)
+	werr = c.SendClientHelloPayload(`sm2`, `sm4-ctr-256`, `blake2s256`, `hello world, bed`)
 	if werr != nil {
 		c.wNotifiedSignal <- false
 		c.MiProxy.CloseAll()

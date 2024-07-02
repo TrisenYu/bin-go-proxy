@@ -8,7 +8,7 @@ import (
 )
 
 /*
-udp + 可靠传输。传数据包又要用到 Socket.Sock
+udp + trusted transmission
 
 Conn is a generic stream-oriented network connection.
 
@@ -18,12 +18,12 @@ type (
 	KCP struct{}
 )
 
-// 可靠读
+// trusted read
 func (kcp *KCP) Read(b []byte) (n int, err error) {
 	return 0, nil
 }
 
-// 可靠写
+// trusted write
 func (kcp *KCP) Write(b []byte) (n int, err error) {
 	return 0, nil
 }

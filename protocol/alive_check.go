@@ -2,4 +2,4 @@
 // (C) 2024 Author: <kisfg@hotmail.com>
 package protocol
 
-// 代理和客户可借此判断主机是否存活。
+// TODO
