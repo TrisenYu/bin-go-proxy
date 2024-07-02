@@ -1,0 +1,7 @@
+Interceptor/ref/
+Interceptor/wintun/include/
+service/ref-kcp
+service/note.md
+experimental/
+*.txt
+.vscode/
