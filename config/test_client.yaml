@@ -1,0 +1,10 @@
+# SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
+# (C) 2024 Author: <kisfg@hotmail.com>
+local:
+  InterceptorPort: 53197
+  ProxySocket: "[::1]:9971"
+  AsymmetricCipher: "sm2"
+  StreamCipher: "zuc"
+  HashCipher: "sha256"
+  AccessToken: "123456789"
+  
