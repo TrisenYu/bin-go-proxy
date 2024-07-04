@@ -145,13 +145,13 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, access_tok
 		choice |= uint32(cryptoprotect.PICK_AES_OFB_256) << 8
 		c.StreamCipher = &cryptoprotect.AES_OFB{}
 	case `aes-ctr-256`:
-		choice |= uint32(cryptoprotect.PICK_AES_OFB_256) << 8
+		choice |= uint32(cryptoprotect.PICK_AES_CTR_256) << 8
 		c.StreamCipher = &cryptoprotect.AES_CTR{}
 	case `sm4-ofb-256`:
 		choice |= uint32(cryptoprotect.PICK_SM4_OFB_256) << 8
 		c.StreamCipher = &cryptoprotect.SM4_OFB{}
 	case `sm4-ctr-256`:
-		choice |= uint32(cryptoprotect.PICK_SM4_OFB_256) << 8
+		choice |= uint32(cryptoprotect.PICK_SM4_CTR_256) << 8
 		c.StreamCipher = &cryptoprotect.SM4_CTR{}
 	case `zuc`:
 		fallthrough
@@ -231,7 +231,7 @@ func (c *Client) readStep2() error {
 	ackcpub, _, err := c.MiProxy.Read()
 	if !protocol.AckFlowValidation(c.HashCipher, ackcpub, []byte(protocol.ACKCPUB), &c.ackTimCheck, &c.ackRec) {
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake_client.go-132] unexpected cut or err:`, err)
+		return defErr.DescribeThenConcat(`unexpected cut or err:`, err)
 	}
 	return nil
 }
@@ -252,7 +252,7 @@ func (c *Client) writeStep3(cflow []byte, turn int) error {
 	cnt, err := c.MiProxy.Write(cflow)
 	if err != nil || cnt != uint(len(cflow)) {
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake_client.go-156]: inproperly write to proxy`, err)
+		return defErr.DescribeThenConcat(`inproperly write to proxy`, err)
 	}
 	cack := <-c.wNeedBytes
 	var choice []byte
@@ -262,11 +262,11 @@ func (c *Client) writeStep3(cflow []byte, turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKCPK2)
 	default:
-		return errors.New(`[handshake_client.go-170] invalid turn`)
+		return errors.New(`invalid turn`)
 	}
 	if !protocol.AckFlowValidation(c.HashCipher, cack, choice, &c.ackTimCheck, &c.ackRec) {
 		c.MiProxy.CloseAll()
-		return errors.New("[handshake_client.go-173] client: proxy send a fraud ack-cpk ")
+		return errors.New("client: proxy send a fraud ack-cpk ")
 	}
 	return nil
 }
@@ -277,7 +277,7 @@ func (c *Client) readStep3() error {
 	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
 		c.wNeedBytes <- []byte(``)
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake_client.go-160] client: ackcpk failed or err:`, err)
+		return defErr.DescribeThenConcat(`client: ackcpk failed or err:`, err)
 	}
 	c.wNeedBytes <- ackcpk
 	return nil
@@ -292,7 +292,7 @@ func (c *Client) writeStep4(turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKPPK2)
 	default:
-		return errors.New(`[handshake_client.go-197] invalid turn`)
+		return errors.New(`invalid turn`)
 	}
 	// log.Println(`curr choice`, string(choice))
 	if !<-c.rDoneSignal {
@@ -346,7 +346,7 @@ func (c *Client) recheckHash(presessionkey *protocol.ShakeHandMsg) error {
 	hashX = append(hashX, presessionkey.Timestamp...)
 
 	recheck_hash := c.HashCipher.CalculateHash(hashX)
-	status, descript := utils.CompareByteArrEQ(recheck_hash[:], presessionkey.Hasher[:])
+	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash[:], presessionkey.Hasher[:])
 	if !status {
 		c.MiProxy.CloseAll()
 		return errors.New("HashError :=" + descript)
@@ -365,10 +365,10 @@ func (c *Client) readChallenge(presessionkey *protocol.ShakeHandMsg) error {
 	c.StreamCipher.SetKey(tmpKey[:])
 	c.StreamCipher.SetIv(presessionkey.Kern[cryptoprotect.KeySize : cryptoprotect.KeySize+cryptoprotect.IVSize])
 	resp_rn, _, err := c.DecRead()
-	status, descript := utils.CompareByteArrEQ(resp_rn, rn.Kern[:])
+	status, descript := utils.CompareByteSliceEqualOrNot(resp_rn, rn.Kern[:])
 	if !status {
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake_client.go-264] fake rn sent by proxy. Abort connection due to `+descript, err)
+		return defErr.DescribeThenConcat(`fake rn sent by proxy. Abort connection due to `+descript, err)
 	}
 	return nil
 }
@@ -378,7 +378,7 @@ func (c *Client) writeFinish() error {
 	cnt, err := c.EncWrite(append(curr, res...))
 	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake_client.go-273] failed to send finish or err:`, err)
+		return defErr.DescribeThenConcat(`failed to send finish or err:`, err)
 	}
 	return nil
 }

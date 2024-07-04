@@ -76,13 +76,11 @@ func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from 
 	if cnt != 4+auth.TokenLen || err != nil {
 		return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
 	}
-	/*
-		token := client_hello[4:]
-		state, descript := auth.AuthValidation(token)
-		if !state {
-			return errors.New(descript)
-		}
-	*/
+	token := client_hello[4:]
+	state, descript := auth.AuthValidation(token)
+	if !state {
+		return errors.New(descript)
+	}
 	_crypto_suite := [4]byte(client_hello[:4])
 	crypto_suite := utils.BytesToUint32(_crypto_suite)
 	var functor func(uint32, int) byte = func(u uint32, i int) byte { return byte((u >> i) & 0xFF) }
@@ -234,7 +232,7 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 	cnt, err := ep.Client.Write(pflow)
 	if err != nil || cnt != uint(len(pflow)) {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`[handshak-proxy.go-170]: inproperly write to proxy`, err)
+		return defErr.DescribeThenConcat(`inproperly write to proxy`, err)
 	}
 	// log.Println(`wait pflow`, turn)
 	pack := <-ep.wNeedBytes
@@ -245,12 +243,12 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKPPK2)
 	default:
-		return errors.New(`[handshake-client.go-179] invalid turn`)
+		return errors.New(`invalid turn`)
 	}
 
 	if !protocol.AckFlowValidation(ep.HashCipher, pack, choice, &ep.ackTimCheck, &ep.ackRec) {
 		ep.Client.CloseAll()
-		return errors.New("[handshake_client.go-186] client: proxy send a fraud ack-cpk ")
+		return errors.New("client: proxy send a fraud ack-cpk ")
 	}
 	return nil
 }
@@ -276,18 +274,18 @@ func (ep *EncFlowProxy) writeStep3(turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKCPK2)
 	default:
-		return errors.New(`[handshake-client.go-209] invalid turn`)
+		return errors.New(`invalid turn`)
 	}
 	if !<-ep.rSignal {
 		ep.Client.CloseAll()
-		return errors.New(`[handshake-client.go-213] failed to recv cpack which is accessed from ep.rSignal`)
+		return errors.New(`failed to recv cpack which is accessed from ep.rSignal`)
 	}
 	curr, res := protocol.AckToTimestampHash(ep.HashCipher, choice)
 	cnt, err := ep.Client.Write(append(curr, res...))
 
 	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`[handshake-client.go-218] incorrectly send ack-cpk`, err)
+		return defErr.DescribeThenConcat(`incorrectly send ack-cpk`, err)
 	}
 	return nil
 }
@@ -330,7 +328,7 @@ func (ep *EncFlowProxy) recheckHash(rn *protocol.ShakeHandMsg) error {
 	hashX := append(rn.Kern[:], utils.Uint64ToBytesInLittleEndian(rn.Nonce)...)
 	hashX = append(hashX, rn.Timestamp...)
 	recheck_hash := [32]byte(ep.HashCipher.CalculateHash(hashX))
-	status, descript := utils.CompareByteArrEQ(recheck_hash[:], rn.Hasher[:])
+	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash[:], rn.Hasher[:])
 	if !status {
 		ep.Client.CloseAll()
 		return errors.New("HashError:" + descript)
@@ -466,6 +464,7 @@ func (ep *EncFlowProxy) shakeHandReadCoroutine() (rerr error) {
 		return
 	}
 	ep.rSignal <- true
+	// TODO: estimate DDos?
 	rerr = ep.readStep1()
 	if rerr != nil {
 		return

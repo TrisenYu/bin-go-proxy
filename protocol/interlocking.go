@@ -90,13 +90,12 @@ func (t *SharedTimeFormat) SafeResetLen() string {
 	return res
 }
 
-// 两 4 字节随机数合计 8 字节。按如下方式从低组别往高组别异或 32 字节 pressionkey 中的 8 组首字节。
 /*
 	+----+----+----+----+----+----+----+----+
 	|c   |p   |c   |p   |c   |p   |c   |p   |
 	+----+----+----+----+----+----+----+----+
 */
-// 随后需要重整化 rn 并进一步混淆 pressionkey
+// renormalize rn and confuse pressionkey
 func GenerateSessionKey(prekey [32]byte, rn [48]byte, cnonce, pnonce uint64) [32]byte {
 	key := make([]byte, 32)
 	for i := 0; i < 32; i += 4 {
@@ -157,9 +156,9 @@ func AckToTimestampHash(hash_fn cryptoprotect.HashCipher, ack_payload []byte) (t
 }
 
 func hasSaved(checkTime, stage_ack []byte, tmpTimeStamps *[8][]byte, rec_cnt *int) bool {
-	flag1, _ := utils.CompareByteArrEQ(stage_ack, []byte(ACKCPUB))
-	flag2, _ := utils.CompareByteArrEQ(stage_ack, []byte(ACKPPUB))
-	flag3, _ := utils.CompareByteArrEQ(stage_ack, []byte(HANDHLT))
+	flag1, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(ACKCPUB))
+	flag2, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(ACKPPUB))
+	flag3, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(HANDHLT))
 
 	if flag1 || flag2 {
 		*rec_cnt = 0
@@ -171,7 +170,7 @@ func hasSaved(checkTime, stage_ack []byte, tmpTimeStamps *[8][]byte, rec_cnt *in
 	}
 
 	for idx := 0; idx < *rec_cnt; idx++ {
-		innerFlag, _ := utils.CompareByteArrEQ(tmpTimeStamps[idx][:], checkTime[:])
+		innerFlag, _ := utils.CompareByteSliceEqualOrNot(tmpTimeStamps[idx][:], checkTime[:])
 		if innerFlag || !TimeStampCmp(checkTime, tmpTimeStamps[idx]) {
 			/* check whether the timestamp has existed or not And
 			   whether the timestamp violates the monotonically increasing order */
@@ -210,19 +209,19 @@ func AckFlowValidation(
 	trunc_it := ack_flow[time_len : time_len+4]
 	copy(time_salt[time_len:time_len+8], stage_ack)
 	check_it := hash_fn.CalculateHash(time_salt)
-	flag, _ := utils.CompareByteArrEQ(check_it[:4], trunc_it)
+	flag, _ := utils.CompareByteSliceEqualOrNot(check_it[:4], trunc_it)
 	return flag
 }
 
 /*
-约定：入参 input 一定是时间戳
+input must be standard timestamp, which is shown below.
 
 	xxxxx-02-02 23:59:59.233333333
 	0    ^   4  7  a  d  0       9
-		 |               1       1
-		yearlen
+	     |               1       1
+	  yearlen
 
-除去空格、间隔符`-`、冒号、小数点所占的 6 位，还有：
+the way for turning it into bigInt is to sub each byte with 48 and remove space,dash,colon and point
 
 	xxxxx0202235959233333333
 */
@@ -273,6 +272,21 @@ func TimeStampCmp(inp1, inp2 []byte) bool {
 func TimeStampMinus(inp_maxn, inp_minn []byte) {
 	val1, val2 := TimeStampToBigInt(inp_maxn), TimeStampToBigInt(inp_minn)
 	tmp := new(big.Int)
-	// TODO: 实现相差判断。超出某个值的就不接受。
-	utils.BytesHexForm(tmp.Sub(val1, val2).Bytes())
+	// 30_0000 * 1000 m / s * 0.191 s = 57300 => 28650 km
+	// (ping from China to Argentina and receive response from Agentina to China)
+	/*
+		Assuming that the existing(2024) data link does not pass through satellites
+		but uses optical fibers or transoceanic cables.
+		For the communicating parties, an intermediary would only be able to successfully deceive both parties
+		And continuously eavesdrop on the communication content if they effectively utilize this communication protocol
+		And are geographically very close to either party.
+		However, no matter what, relying on ping operations to measure communication time
+		In order to determine if the parties are under a man-in-the-middle attack
+		is likely to be less effective than a specially trained AI prediction.
+
+		Technically we should collect the historical ping data and combine the network conditions
+		(like degree of congestion, changing topology) to determine. But all of this are laborious.
+	*/
+	sub := tmp.Sub(val1, val2).Bytes()
+	utils.BytesHexForm(sub)
 }

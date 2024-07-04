@@ -19,7 +19,7 @@ const letters string = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZ
 compare whether two byte slices are the same.
 return true, `ok` if true, otherwise return false and the reason.
 */
-func CompareByteArrEQ(a []byte, b []byte) (bool, string) {
+func CompareByteSliceEqualOrNot(a []byte, b []byte) (bool, string) {
 	if len(a) != len(b) {
 		return false, `Len: uneq`
 	}
@@ -34,13 +34,13 @@ func CompareByteArrEQ(a []byte, b []byte) (bool, string) {
 /*
 generate pseudo-random number between assigned parameter `min` and assigned parameter `max`.
 */
-func generateRandomNumber(min int, max int) int {
+func generateRandomIntNumber(min int, max int) int {
 	rand.New(rand.NewSource(time.Now().Unix()))
 	return rand.Intn(max-min+1) + min
 }
 
 /*
-Deprecated
+Deprecated.
 
 	 `tester` must be in the shape like `[ipv6]:port` or `ipv4:port` or `domain:port`.
 
@@ -125,7 +125,7 @@ func BytesSpliterInHalfChanceField(a []byte) ([]byte, []byte) {
 	if lena < 1 {
 		return []byte(``), []byte(``)
 	}
-	portion := generateRandomNumber(50, 60)
+	portion := generateRandomIntNumber(50, 60)
 	return a[:portion*lena/100], a[portion*lena/100:]
 }
 
@@ -145,7 +145,7 @@ func MinInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~in
 	return b
 }
 
-// get absolute path of current file
+// get absolute path of current `utils.go`
 func GetRunPath() (string, error) {
 	path, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	return path, err
@@ -155,7 +155,8 @@ func GetFilePath(inp string) (string, error) {
 	return filepath.Abs(filepath.Dir(inp))
 }
 
-// debug function used for dumping hex representation of a byte slice.
+// Debug function used for dumping hex representation of a byte slice.
+// Timestamp attached.
 func BytesHexForm(inp []byte) {
 	if len(inp) == 0 {
 		log.Println(0)

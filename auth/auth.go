@@ -28,7 +28,7 @@ func AuthValidation(remote_token []byte) (bool, string) {
 	if len(buf) == 0 {
 		return false, "Failed to authenticate due to empty token."
 	}
-	flag, reason := utils.CompareByteArrEQ(buf, remote_token)
+	flag, reason := utils.CompareByteSliceEqualOrNot(buf, remote_token)
 	return flag, reason
 }
 

@@ -4,6 +4,7 @@ package cryptoprotect
 
 import "golang.org/x/crypto/salsa20"
 
+// Deprecated
 func Salsa20FlipCrypt(inp []byte, key [32]byte, iv [16]byte) []byte {
 	oup := make([]byte, len(inp))
 	var extend_iv [24]byte

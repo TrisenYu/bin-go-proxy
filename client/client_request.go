@@ -44,7 +44,7 @@ func (c *Client) ChangeRemoteServer(addrp []byte) error {
 		c.MiProxy.CloseAll()
 		return rerr
 	}
-	status, descript := utils.CompareByteArrEQ(correspond_resp, []byte(protocol.RESP_recv_server_addrp))
+	status, descript := utils.CompareByteSliceEqualOrNot(correspond_resp, []byte(protocol.RESP_recv_server_addrp))
 	if !status {
 		return defErr.DescribeThenConcat(`checked recv-remote-server failed`+descript, rerr)
 	}
@@ -77,7 +77,7 @@ func (c *Client) ChangeSessionKey(
 	c.StreamCipher.SetKey(key[:])
 	c.StreamCipher.SetIv(iv[:])
 	_finish, _, rerr := c.DecRead()
-	status, descript := utils.CompareByteArrEQ(_finish, []byte(protocol.HANDHLT))
+	status, descript := utils.CompareByteSliceEqualOrNot(_finish, []byte(protocol.HANDHLT))
 	if !status {
 		c.MiProxy.CloseAll()
 		return defErr.DescribeThenConcat(`fatal error: can not recv finish from proxy due to`+descript, rerr)

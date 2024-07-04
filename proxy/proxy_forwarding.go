@@ -91,7 +91,7 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 		}
 		/*
 			TODO: avoid self-looping by certain algorithm.
-				.-> . -> .
+			    .-> . -> .
 					^	 |
 					|	 v
 					. <- .

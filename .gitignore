@@ -1,5 +1,6 @@
 Interceptor/ref/
 Interceptor/wintun/include/
+Interceptor/winIpConfig/
 service/ref-kcp
 service/note.md
 experimental/

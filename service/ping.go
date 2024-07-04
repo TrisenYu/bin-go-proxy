@@ -116,3 +116,54 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 	}
 	return utils.MaxInt(lstMaxn, maxnTime), true
 }
+
+// return: average RTT(unit ms) and the reachability result(true for accessable)
+func PingWithoutPrint(
+	dst_ip string,
+	cnt uint16,
+	conn_timeout_sec, pong_timeout_sec uint,
+) (int64, bool) {
+	conn, err := net.DialTimeout(`ip:icmp`, dst_ip, time.Duration(conn_timeout_sec)*time.Second)
+	if err != nil {
+		return -1, false
+	}
+	defer conn.Close()
+
+	var (
+		i        uint16
+		buff     bytes.Buffer
+		sok, rok       = 0, 0
+		res_time int64 = 0
+	)
+	for i = 0; i < cnt; i++ {
+		icmp := &icmpPacket{Type: 8, Code: 0, CheckSum: 0, ID: i, Seq: i}
+		binary.Write(&buff, binary.BigEndian, icmp)
+		payload := []byte(utils.GenerateEnterableRandomString(16))
+		buff.Write(payload)
+		payload = buff.Bytes()
+		buff.Reset()
+		checker := ICMPcheckSum(payload)
+		payload[2], payload[3] = byte(checker>>8), byte(checker) // pad checksum
+
+		st := time.Now()
+		conn.SetDeadline(time.Now().Add(time.Duration(pong_timeout_sec) * time.Second))
+
+		_, err := conn.Write(payload)
+		if err != nil {
+			continue
+		}
+		sok += 1
+
+		buf := make([]byte, 1024)
+		_, err = conn.Read(buf)
+		if err != nil {
+			continue
+		}
+		rok += 1
+		res_time += time.Since(st).Milliseconds()
+	}
+	if rok == 0 {
+		return -1, false
+	}
+	return res_time / int64(cnt), true
+}

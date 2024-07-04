@@ -48,7 +48,7 @@ func (a *AES_CTR) GetIv() []byte {
 func (a *AES_OFB) FlipFlow(msg []byte) []byte {
 	xor_res := make([]byte, len(msg))
 
-	block, err := aes.NewCipher(a.Key[:32])
+	block, err := aes.NewCipher(a.Key[:KeySize])
 	if err != nil {
 		panic(err)
 	}

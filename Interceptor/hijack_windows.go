@@ -37,10 +37,11 @@ var (
 		SetEvent     = kernel32Dll.NewProc(`SetEvent`)
 		CloseHandle  = kernel32Dll.NewProc(`CloseHandle`)
 	*/
-	netiolib = windows.NewLazyDLL(`iphlpapi.dll`)
+	ipHelpApi = windows.NewLazyDLL(`iphlpapi.dll`)
 	// learn.microsoft.com/zh-cn/windows-hardware/drivers/network/initializeunicastipaddressentry
-	InitializeUnicastIpAddressEntry = netiolib.NewProc(`InitializeUnicastIpAddressEntry`)
-	CreateUnicastIpAddressEntry     = netiolib.NewProc(`CreateUnicastIpAddressEntry`)
+	InitializeUnicastIpAddressEntry = ipHelpApi.NewProc(`InitializeUnicastIpAddressEntry`)
+	CreateUnicastIpAddressEntry     = ipHelpApi.NewProc(`CreateUnicastIpAddressEntry`)
+	GetUnicastIpAddressTable        = ipHelpApi.NewProc(`GetUnicastIpAddressTable`)
 
 	// https://learn.microsoft.com/zh-cn/windows/win32/api/combaseapi/nf-combaseapi-cocreateguid
 	Ole32        = windows.NewLazyDLL(`Ole32.dll`)
@@ -206,11 +207,9 @@ func (adapter *WintunAdapter) Init() error {
 	if r1 == 0 {
 		return err
 	}
-
 	err = guid.GUIDSetfromString(adapter.GUID)
-	switch err {
-	case nil:
-		panic(`no err`)
+	if err != nil {
+		return err
 	}
 	err = syscallWintunCreateAdapter.Find()
 	if err != nil {
@@ -225,7 +224,7 @@ func (adapter *WintunAdapter) Init() error {
 		return err
 	}
 	adapter.handle = windows.Handle(r1)
-	log.Println(`r1 is:`, r1)
+	log.Println(`r1 is:`, r1) // to be tested
 
 	return err
 }
@@ -237,8 +236,7 @@ func (adapter *WintunAdapter) Open(dev_name string) error {
 	}
 	r1, _, err := syscallWintunOpenAdapter.Call(UintptrCaster(dev_name))
 	if r1 == 0 {
-		// to Be Tested.
-		log.Println(err.Error())
+		log.Println(err.Error()) // to Be Tested.
 		return err
 	}
 	adapter.handle = windows.Handle(r1)
@@ -358,5 +356,13 @@ func (cs *CurrSession) AllocateSendPacket(packSize int) (res []byte, err error) 
 
 /*
 TODO: IP Configuration
-	  Module Testing
+
+	Module Testing
+
+AF_UNSPEC 0      指定此参数时，此函数返回包含 IPv4 和 IPv6 条目的单播 IP 地址表。
+AF_INET   2 IPv4 指定此参数时，此函数返回仅包含 IPv4 条目的单播 IP 地址表。
+AF_INET6 23 IPv6 指定此参数时，此函数返回仅包含 IPv6 条目的单播 IP 地址表。
 */
+// windows.NOERROR windows.ERROR_NOT_FOUND
+// a pointer points to MIB_UNICASTIPADDRESS_TABLE
+// r1, _, err := GetUnicastIpAddressTable.Call(UintptrCaster(addr_table_type))

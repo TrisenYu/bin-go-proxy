@@ -9,7 +9,7 @@ import (
 
 func TestPing(t *testing.T) {
 	// t.me => unreachable in the Chinese Mainland due to GFW.
-	max_ttl, flag := CheckConnectionByPing("baidu.com", 3)
+	max_ttl, flag := CheckConnectionByPing("10.72.112.118", 3)
 	if !flag {
 		t.Error(`bad ping`)
 	}
