@@ -2,7 +2,11 @@
 // (C) 2024 Author: <kisfg@hotmail.com>
 package cryptoprotect
 
-import "github.com/emmansun/gmsm/zuc"
+import (
+	"crypto/cipher"
+
+	"github.com/emmansun/gmsm/zuc"
+)
 
 func ZUCFlipFlow(obj []byte, key []byte, iv []byte) []byte {
 	/*
@@ -19,21 +23,42 @@ func ZUCFlipFlow(obj []byte, key []byte, iv []byte) []byte {
 }
 
 type ZUC struct {
-	Key [KeySize]byte
-	Iv  [IVSize]byte
-	iv  [zuc.IVSize256 - IVSize]byte // alien. latent overflow risk
+	Key       [KeySize]byte
+	Iv        [IVSize]byte
+	iv        [zuc.IVSize256 - IVSize]byte // alien. latent overflow risk
+	encstream cipher.Stream
+	decstream cipher.Stream
 }
 
-func (_zuc *ZUC) FlipFlow(msg []byte) []byte {
+func (_zuc *ZUC) EncryptFlow(msg []byte) []byte {
 	xor_res := make([]byte, len(msg))
 	extend_iv := [zuc.IVSize256]byte{}
 	copy(extend_iv[:IVSize], _zuc.Iv[:])
 	copy(extend_iv[IVSize:], _zuc.iv[:])
-	stream, err := zuc.NewCipher(_zuc.Key[:], extend_iv[:])
-	if err != nil {
-		panic(err)
+	if _zuc.encstream == nil {
+		stream, err := zuc.NewCipher(_zuc.Key[:], extend_iv[:])
+		if err != nil {
+			panic(err)
+		}
+		_zuc.encstream = stream
 	}
-	stream.XORKeyStream(xor_res, msg)
+	_zuc.encstream.XORKeyStream(xor_res, msg)
+	return xor_res
+}
+
+func (_zuc *ZUC) DecryptFlow(msg []byte) []byte {
+	xor_res := make([]byte, len(msg))
+	extend_iv := [zuc.IVSize256]byte{}
+	copy(extend_iv[:IVSize], _zuc.Iv[:])
+	copy(extend_iv[IVSize:], _zuc.iv[:])
+	if _zuc.decstream == nil {
+		stream, err := zuc.NewCipher(_zuc.Key[:], extend_iv[:])
+		if err != nil {
+			panic(err)
+		}
+		_zuc.decstream = stream
+	}
+	_zuc.decstream.XORKeyStream(xor_res, msg)
 	return xor_res
 }
 

@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	auth "selfproxy/auth"
 	cryptoprotect "selfproxy/cryptoProtect"
+	zipper "selfproxy/cryptoProtect/zipper"
 	defErr "selfproxy/defErr"
 	protocol "selfproxy/protocol"
 	utils "selfproxy/utils"
@@ -71,16 +71,18 @@ func (ep *EncFlowProxy) extractShakeHandMsg(msg []byte) (*protocol.ShakeHandMsg,
 }
 
 func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from config*/ ) error {
-	client_hello, cnt, err := ep.Client.Read()
-	// TODO: TokenLen gain from config.
-	if cnt != 4+auth.TokenLen || err != nil {
-		return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
-	}
-	token := client_hello[4:]
-	state, descript := auth.AuthValidation(token)
-	if !state {
-		return errors.New(descript)
-	}
+	client_hello, _, _ := ep.Client.Read()
+	// TODO: TokenLen gain from config. Otherwise the authentication is not used at all.
+	/*
+		if cnt != 4+auth.TokenLen || err != nil {
+			return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
+		}
+		token := client_hello[4:]
+		state, descript := auth.AuthValidation(token)
+		if !state {
+			return errors.New(descript)
+		}
+	*/
 	_crypto_suite := [4]byte(client_hello[:4])
 	crypto_suite := utils.BytesToUint32(_crypto_suite)
 	var functor func(uint32, int) byte = func(u uint32, i int) byte { return byte((u >> i) & 0xFF) }
@@ -103,10 +105,16 @@ func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from 
 		ep.StreamCipher = &cryptoprotect.AES_OFB{}
 	case byte(cryptoprotect.PICK_AES_CTR_256):
 		ep.StreamCipher = &cryptoprotect.AES_CTR{}
+	case byte(cryptoprotect.PICK_AES_GCM_256):
+		ep.StreamCipher = &cryptoprotect.AES_GCM{}
 	case byte(cryptoprotect.PICK_SM4_OFB_256):
 		ep.StreamCipher = &cryptoprotect.SM4_OFB{}
 	case byte(cryptoprotect.PICK_SM4_CTR_256):
 		ep.StreamCipher = &cryptoprotect.SM4_CTR{}
+	case byte(cryptoprotect.PICK_SM4_GCM_256):
+		ep.StreamCipher = &cryptoprotect.SM4_GCM{}
+	case byte(cryptoprotect.PICK_CHACHA20POLY1305_256):
+		ep.StreamCipher = &cryptoprotect.Chacha20poly1305{}
 	default:
 		return errors.New(`unsupported stream cipher`)
 	}
@@ -124,6 +132,15 @@ func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from 
 		ep.HashCipher = &cryptoprotect.Blake2s256{}
 	default:
 		return errors.New(`unsupported hash cipher`)
+	}
+
+	switch functor(crypto_suite, 24) {
+	case byte(cryptoprotect.PICK_NULL_COMP):
+		ep.CompOption = &zipper.IdCompress{}
+	case byte(cryptoprotect.PICK_ZLIB_COMP):
+		ep.CompOption = &zipper.Zlib{}
+	default:
+		return errors.New(`unsupproted compression algorithm`)
 	}
 	return nil
 }
@@ -205,7 +222,13 @@ func (ep *EncFlowProxy) readStep2() error {
 		ep.Client.CloseAll()
 		return err
 	}
-	ep.wNeedBytes <- pub
+	p, err := ep.CompOption.DecompressMsg(pub)
+	if err != nil {
+		ep.wNeedBytes <- []byte(``)
+		ep.Client.CloseAll()
+		return err
+	}
+	ep.wNeedBytes <- p
 	return nil
 }
 
@@ -218,6 +241,10 @@ func (ep *EncFlowProxy) writeStep2() error {
 	}
 	now, curr_ack := protocol.AckToTimestampHash(ep.HashCipher, []byte(protocol.ACKCPUB))
 	now = append(now, curr_ack...)
+	// TODO: compress hash or not only for pubkey but should compress all?
+	// From the perspective of information theory, the entropy of ciphertext is rather higher than plaintext
+	// and therefore ciphertext is more likely in arousing the suspicion.
+	// Nevertheless, I think the sliced handshake payload will need this.
 	cnt, err := ep.Client.Write(now)
 	if cnt != uint(len(now)) || err != nil {
 		ep.Client.CloseAll()
@@ -229,8 +256,13 @@ func (ep *EncFlowProxy) writeStep2() error {
 
 // step4 send pflow1 | pflow2 and wait for ack
 func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
-	cnt, err := ep.Client.Write(pflow)
-	if err != nil || cnt != uint(len(pflow)) {
+	pf, err := ep.CompOption.CompressMsg(pflow)
+	if err != nil {
+		ep.Client.CloseAll()
+		return errors.New(`unable to compress pflow`)
+	}
+	cnt, err := ep.Client.Write(pf)
+	if err != nil || cnt != uint(len(pf)) {
 		ep.Client.CloseAll()
 		return defErr.DescribeThenConcat(`inproperly write to proxy`, err)
 	}
@@ -292,7 +324,13 @@ func (ep *EncFlowProxy) writeStep3(turn int) error {
 
 // step3 recv cflow1 | cflow2
 func (ep *EncFlowProxy) readStep3() ([]byte, error) {
-	cflow, _, err := ep.Client.Read()
+	cf, _, err := ep.Client.Read()
+	if err != nil {
+		ep.rSignal <- false
+		ep.Client.CloseAll()
+		return []byte(``), err
+	}
+	cflow, err := ep.CompOption.DecompressMsg(cf)
 	if err != nil {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
@@ -345,7 +383,9 @@ func (ep *EncFlowProxy) writeResponse(proxy_client_shakehand *protocol.ShakeHand
 		[32]byte(ep.StreamCipher.GetKey()),
 		ep.rpk.Kern,
 		ep.rpk.Nonce,
-		proxy_client_shakehand.Nonce)
+		proxy_client_shakehand.Nonce,
+		ep.HashCipher,
+	)
 	ep.StreamCipher.SetKey(tmpKey[:])
 
 	// TOFIX: localhost will fail if not sleeping here

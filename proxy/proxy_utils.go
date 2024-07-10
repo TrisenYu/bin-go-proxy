@@ -17,6 +17,7 @@ type EncFlowProxy struct {
 	AsymmCipher       cryptoprotect.AsymmCipher
 	StreamCipher      cryptoprotect.StreamCipher
 	HashCipher        cryptoprotect.HashCipher
+	CompOption        cryptoprotect.CompOption
 
 	Client socket.Socket
 	Remote socket.Socket
@@ -47,15 +48,20 @@ func (p *EncFlowProxy) SendPub() error {
 	key_len := p.AsymmCipher.GetPubLen()
 	key := make([]byte, key_len)
 	p.AsymmCipher.GetPub(&key)
-	cnt, err := p.Client.Write(key)
-	if uint64(cnt) != key_len /* len(pubHexVal) */ || err != nil {
-		err = defErr.DescribeThenConcat(`sending interrupts`, err)
+	var res_err error
+	k, err := p.CompOption.CompressMsg(key)
+	if err != nil {
+		res_err = defErr.DescribeThenConcat(`compression failed`, err)
 	}
-	return err
+	cnt, err := p.Client.Write(k)
+	if cnt != uint(len(k)) || err != nil {
+		res_err = defErr.DescribeThenConcat(`sending interrupts `+err.Error()+`--`, err)
+	}
+	return res_err
 }
 
 func (ep *EncFlowProxy) EncWrite2Client(plaintext []byte) (uint, error) {
-	enc := ep.StreamCipher.FlipFlow(plaintext)
+	enc := ep.StreamCipher.EncryptFlow(plaintext)
 	cnt, err := ep.Client.Write(enc)
 	return cnt, err
 }
@@ -65,7 +71,7 @@ func (ep *EncFlowProxy) DecReadViaClient() ([]byte, uint, error) {
 	if cnt == 0 || err != nil {
 		return []byte(``), 0, errors.Join(err, errors.New(`got empty enc-string from client`))
 	}
-	dec := ep.StreamCipher.FlipFlow(enc)
+	dec := ep.StreamCipher.DecryptFlow(enc)
 	return dec, cnt, nil
 }
 

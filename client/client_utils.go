@@ -27,6 +27,7 @@ type Client struct {
 	AsymmCipher      cryptoprotect.AsymmCipher
 	StreamCipher     cryptoprotect.StreamCipher
 	HashCipher       cryptoprotect.HashCipher
+	CompOption       cryptoprotect.CompOption
 
 	wNeedBytes      chan []byte
 	rDoneSignal     chan bool
@@ -74,7 +75,7 @@ func (c *Client) DeleteChannel() {
 }
 
 func (c *Client) EncWrite(plaintext []byte) (uint, error) {
-	enc := c.StreamCipher.FlipFlow(plaintext)
+	enc := c.StreamCipher.EncryptFlow(plaintext)
 	cnt, err := c.MiProxy.Write(enc)
 	return cnt, err
 }
@@ -84,7 +85,7 @@ func (c *Client) DecRead() ([]byte, uint, error) {
 	if cnt == 0 || err != nil {
 		return []byte(``), 0, defErr.Concat(err, `or read empty enc-bytes`)
 	}
-	dec := c.StreamCipher.FlipFlow(enc)
+	dec := c.StreamCipher.DecryptFlow(enc)
 	return dec, cnt, nil
 }
 
@@ -92,9 +93,14 @@ func (c *Client) sendPub() error {
 	key_len := c.AsymmCipher.GetPubLen()
 	key := make([]byte, key_len)
 	c.AsymmCipher.GetPub(&key)
-	cnt, err := c.MiProxy.Write(key)
-	if uint64(cnt) != key_len {
-		err = defErr.DescribeThenConcat(`client sending failure`, err)
+	var res_err error
+	k, err := c.CompOption.CompressMsg(key)
+	if err != nil {
+		res_err = defErr.DescribeThenConcat(`compression failed`, err)
 	}
-	return err
+	cnt, err := c.MiProxy.Write(k)
+	if uint64(cnt) != key_len {
+		res_err = defErr.DescribeThenConcat(`client sending failure`+err.Error()+`--`, res_err)
+	}
+	return res_err
 }

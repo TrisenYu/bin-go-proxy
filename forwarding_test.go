@@ -68,6 +68,7 @@ func TestForwarding(t *testing.T) {
 		werr, rerr := ep.Shakehand()
 		ch_err <- [2]error{werr, rerr}
 	}()
+	time.Sleep(time.Millisecond)
 	cwerr, crerr := c.Shakehand()
 	if cwerr != nil {
 		t.Error(cwerr.Error())
@@ -85,7 +86,7 @@ func TestForwarding(t *testing.T) {
 		t.Error(prerr.Error())
 	}
 
-	log.Println(`[forwarding_test.go-28] Successfully shakehand.`)
+	log.Println(`[forwarding_test.go-28] End of shakehand.`)
 
 	go func() {
 		key, iv, err := cryptoprotect.GeneratePresessionKey()

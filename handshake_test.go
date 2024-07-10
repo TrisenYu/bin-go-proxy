@@ -102,10 +102,8 @@ func TestHandShakeInTCP6(t *testing.T) {
 	}()
 	jup, juc := <-server_done, <-client_done
 	if jup && juc {
-		log.Println(`key:`, hex.EncodeToString(c.StreamCipher.GetKey()),
-			`iv: `, hex.EncodeToString(c.StreamCipher.GetIv()))
-		log.Println(`epKey:`, hex.EncodeToString(ep.StreamCipher.GetKey()),
-			`epIv: `, hex.EncodeToString(ep.StreamCipher.GetIv()))
+		log.Println(`key:`, hex.EncodeToString(c.StreamCipher.GetKey()))
+		log.Println(`epKey:`, hex.EncodeToString(ep.StreamCipher.GetKey()))
 	} else {
 		t.Error(`Unaccepted`)
 		return

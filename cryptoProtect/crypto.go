@@ -2,7 +2,9 @@
 // (C) 2024 Author: <kisfg@hotmail.com>
 package cryptoprotect
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+)
 
 /*
 	Temporarily define crypto-suite-numno as a 4 bytes number.
@@ -15,7 +17,8 @@ import "crypto/rand"
 type (
 	asymmetric_cipher_choice uint // asymmetric crypto alias
 	stream_cipher_choice     uint // stream crypto alias
-	hash_cipher_choice       uint // hash crypto alias
+	hash_cipher_choice       uint // hash crypto alias'
+	compressed_choice        uint // alias for certain algorithm compression
 )
 
 const (
@@ -28,12 +31,15 @@ const (
 )
 
 const (
-	PICK_ZUC         stream_cipher_choice = iota + 1 // zuc stream cipher
-	PICK_SALSA20                                     // salsa20 stream cipher
-	PICK_AES_OFB_256                                 // aes-output-feedback-256 cipher
-	PICK_AES_CTR_256                                 // aes-couter-mode-256 cipher
-	PICK_SM4_OFB_256                                 // sm4-output-feedback-256 cipher
-	PICK_SM4_CTR_256                                 // sm4-couter-mode-256 cipher
+	PICK_ZUC                  stream_cipher_choice = iota + 1 // zuc stream cipher
+	PICK_SALSA20                                              // salsa20 stream cipher
+	PICK_AES_OFB_256                                          // aes-output-feedback-256 cipher
+	PICK_AES_CTR_256                                          // aes-couter-mode-256 cipher
+	PICK_AES_GCM_256                                          // aes-galois-counter-mode cipher
+	PICK_SM4_OFB_256                                          // sm4-output-feedback-256 cipher
+	PICK_SM4_CTR_256                                          // sm4-couter-mode-256 cipher
+	PICK_SM4_GCM_256                                          // sm4-galois-counter-mode cipher
+	PICK_CHACHA20POLY1305_256                                 // chacha20-poly1305 cipher
 )
 
 const (
@@ -42,6 +48,11 @@ const (
 	PICK_SHA3_256                                 // sha3-256
 	PICK_BLAKE2B256                               // blake2b256
 	PICK_BLAKE2S256                               // blake2s56
+)
+
+const (
+	PICK_NULL_COMP compressed_choice = iota + 1 // no need for compression alogrithm
+	PICK_ZLIB_COMP                              // zstd compression
 )
 
 type AsymmCipher interface {
@@ -80,13 +91,22 @@ type StreamCipher interface {
 	// return the key in the representation of bytes
 	GetKey() []byte
 	// return the iv in the representation of bytes
-	GetIv() []byte
-	// encryption and decryption in stream cipher can be treated as a xor-flip operation
-	FlipFlow(msg []byte) []byte
+	// GetIv() []byte
+
+	// IV stripped.
+	EncryptFlow(msg []byte) []byte
+	DecryptFlow(msg []byte) []byte
 }
 
 type HashCipher interface {
 	CalculateHash(msg []byte) []byte // not for file
+}
+
+type CompOption interface {
+	InitCompresser() error
+	InitDecompresser() error
+	CompressMsg(msg []byte) ([]byte, error)
+	DecompressMsg(msg []byte) ([]byte, error)
 }
 
 func GeneratePresessionKey() ([]byte, []byte, error) {
