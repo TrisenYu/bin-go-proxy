@@ -1,7 +1,7 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
 // (C) 2024 Author: <kisfg@hotmail.com>
 // ACKNOWLEDGEMENT: ksmeow.moe/ntp/
-// _				github.com/vladimirvivien/go-ntp-client/blob/master/time.go
+// _                github.com/vladimirvivien/go-ntp-client/blob/master/time.go
 package service
 
 import (
@@ -77,29 +77,30 @@ type ntp_pack struct {
 // |  + ----- version (3)
 // + -------- leap year indicator, 0 no warning
 
-func AccessCurrTime(idx int) error {
+func AccessCurrTime(idx int) (time.Time, error) {
+	var res time.Time
 	if idx >= len(ntp_server_list) {
 		idx = 6
 	}
 	conn, err := net.Dial("udp", ntp_server_list[idx])
 	if err != nil {
-		return err
+		return res, err
 	}
 	defer conn.Close()
 	if err = conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		return err
+		return res, err
 	}
 	req := &ntp_pack{Settings: 0x1B}
 	if err = binary.Write(conn, binary.BigEndian, req); err != nil {
-		return err
+		return res, err
 	}
 	rsp := &ntp_pack{}
 	if err = binary.Read(conn, binary.BigEndian, rsp); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	secs := float64(rsp.TxTimeSec) - ntpEpochOffset
 	nanos := (int64(rsp.TxTimeFrac) * 1e9) >> 32 // convert fractional to nanos
-	res := time.Unix(int64(secs), nanos)
+	res = time.Unix(int64(secs), nanos)
 	log.Println(res)
-	return nil
+	return res, nil
 }

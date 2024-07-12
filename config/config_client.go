@@ -13,12 +13,13 @@ import (
 
 type (
 	local struct {
-		InterceptorPort  uint16 `yaml:"InterceptorPort"`
-		ProxySocket      string `yaml:"ProxySocket"`
-		AsymmetricCipher string `yaml:"AsymmetricCipher"`
-		StreamCipher     string `yaml:"StreamCipher"`
-		HashCipher       string `yaml:"HashCipher"`
-		AccessToken      string `yaml:"AccessToken"`
+		InterceptorPort     uint16 `yaml:"InterceptorPort"`
+		ProxySocket         string `yaml:"ProxySocket"`
+		AsymmetricCipher    string `yaml:"AsymmetricCipher"`
+		StreamCipher        string `yaml:"StreamCipher"`
+		HashCipher          string `yaml:"HashCipher"`
+		CompressedAlgorithm string `yaml:"CompressedAlgorithm"`
+		AccessToken         string `yaml:"AccessToken"`
 	}
 	ClientCommunicationConfig struct {
 		Local local `yaml:"local"`

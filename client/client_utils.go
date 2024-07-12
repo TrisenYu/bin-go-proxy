@@ -9,10 +9,10 @@ import (
 	"net"
 	"sync"
 
-	cryptoprotect "selfproxy/cryptoProtect"
-	defErr "selfproxy/defErr"
-	"selfproxy/protocol"
-	socket "selfproxy/socket"
+	cryptoprotect "bingoproxy/cryptoProtect"
+	defErr "bingoproxy/defErr"
+	protocol "bingoproxy/protocol"
+	socket "bingoproxy/socket"
 )
 
 type ExitFlag struct {
@@ -33,8 +33,9 @@ type Client struct {
 	rDoneSignal     chan bool
 	wNotifiedSignal chan bool
 
-	rn          *protocol.ShakeHandMsg
-	ackTimCheck [8][]byte
+	rn          *protocol.HandShakeMsg
+	ackTimCheck *[8][]byte
+	pingRef     int64
 	ackRec      int
 }
 

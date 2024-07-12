@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"selfproxy/utils"
+	"bingoproxy/utils"
 )
 
 const (

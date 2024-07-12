@@ -1,11 +1,13 @@
+// SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
+// (C) 2024 Author: <kisfg@hotmail.com>
 package zipper
 
 import (
 	"log"
 	"testing"
 
-	cryptoprotect "selfproxy/cryptoProtect"
-	"selfproxy/utils"
+	cryptoprotect "bingoproxy/cryptoProtect"
+	utils "bingoproxy/utils"
 )
 
 func TestZstdCompressionAlgorithm(t *testing.T) {

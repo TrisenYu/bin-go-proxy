@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	client "selfproxy/client"
-	defErr "selfproxy/defErr"
-	proxy "selfproxy/proxy"
+	client "bingoproxy/client"
+	defErr "bingoproxy/defErr"
+	proxy "bingoproxy/proxy"
 )
 
 func TestHandShakeInTCP6(t *testing.T) {

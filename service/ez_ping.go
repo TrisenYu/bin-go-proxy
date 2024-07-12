@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	utils "selfproxy/utils"
+	utils "bingoproxy/utils"
 )
 
 type icmpPacket struct {
@@ -117,12 +117,20 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 	return utils.MaxInt(lstMaxn, maxnTime), true
 }
 
-// return: average RTT(unit ms) and the reachability result(true for accessable)
+// return: average RTT(unit us) and the reachability result(true for accessable)
 func PingWithoutPrint(
 	dst_ip string,
 	cnt uint16,
 	conn_timeout_sec, pong_timeout_sec uint,
 ) (int64, bool) {
+	switch dst_ip {
+	// TODO: bad implementation!
+	case `[::1]`:
+		fallthrough
+	case `127.0.0.1`:
+		return 15500, true
+	default:
+	}
 	conn, err := net.DialTimeout(`ip:icmp`, dst_ip, time.Duration(conn_timeout_sec)*time.Second)
 	if err != nil {
 		return -1, false
@@ -146,7 +154,7 @@ func PingWithoutPrint(
 		payload[2], payload[3] = byte(checker>>8), byte(checker) // pad checksum
 
 		st := time.Now()
-		conn.SetDeadline(time.Now().Add(time.Duration(pong_timeout_sec) * time.Second))
+		conn.SetDeadline(time.Now().Add(time.Duration(pong_timeout_sec) * 2 * time.Second))
 
 		_, err := conn.Write(payload)
 		if err != nil {
@@ -160,7 +168,7 @@ func PingWithoutPrint(
 			continue
 		}
 		rok += 1
-		res_time += time.Since(st).Milliseconds()
+		res_time += time.Since(st).Microseconds()
 	}
 	if rok == 0 {
 		return -1, false

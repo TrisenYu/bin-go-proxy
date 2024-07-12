@@ -6,23 +6,22 @@ import (
 	"errors"
 	"net"
 
-	utils "selfproxy/utils"
+	utils "bingoproxy/utils"
 )
 
 type Socket struct {
 	Conn net.Conn
-	// UdpConn net.UDPConn
 }
 
 func (s *Socket) Read() ([]byte, uint, error) {
 	if s.Conn == nil {
 		return []byte(``), 0, errors.New(`tried to write on an empty connection`)
 	}
-	res := make([]byte, 4096)
+	res := make([]byte, 2048)
 	cnt, err := s.Conn.Read(res)
-	choice := utils.MinInt(cnt, 4096)
+	choice := utils.MinInt(cnt, 2048)
 	if choice != cnt {
-		err = errors.New(`incoming flow exccedd the maximum capicity(4096) of recv-buf, need continous recv`)
+		err = errors.New(`incoming flow exccedd the maximum capicity(2048) of recv-buf, need continous recv`)
 	}
 	return res[:choice], uint(choice), err
 }

@@ -3,7 +3,7 @@ package client
 import (
 	"net"
 
-	interceptor "selfproxy/Interceptor"
+	interceptor "bingoproxy/Interceptor"
 )
 
 func InitToProxy() error {

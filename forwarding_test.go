@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	client "selfproxy/client"
-	cryptoprotect "selfproxy/cryptoProtect"
-	protocol "selfproxy/protocol"
-	proxy "selfproxy/proxy"
+	client "bingoproxy/client"
+	cryptoprotect "bingoproxy/cryptoProtect"
+	protocol "bingoproxy/protocol"
+	proxy "bingoproxy/proxy"
 )
 
 func TestForwarding(t *testing.T) {
@@ -72,18 +72,22 @@ func TestForwarding(t *testing.T) {
 	cwerr, crerr := c.Shakehand()
 	if cwerr != nil {
 		t.Error(cwerr.Error())
+		return
 	}
 	if crerr != nil {
 		t.Error(crerr.Error())
+		return
 	}
 
 	ep_err := <-ch_err
 	pwerr, prerr := ep_err[0], ep_err[1]
 	if pwerr != nil {
 		t.Error(pwerr.Error())
+		return
 	}
 	if prerr != nil {
 		t.Error(prerr.Error())
+		return
 	}
 
 	log.Println(`[forwarding_test.go-28] End of shakehand.`)

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"io"
 
-	cryptoprotect "selfproxy/cryptoProtect"
-	defErr "selfproxy/defErr"
-	protocol "selfproxy/protocol"
-	socket "selfproxy/socket"
+	cryptoprotect "bingoproxy/cryptoProtect"
+	defErr "bingoproxy/defErr"
+	protocol "bingoproxy/protocol"
+	socket "bingoproxy/socket"
 )
 
 type EncFlowProxy struct {
@@ -26,11 +26,12 @@ type EncFlowProxy struct {
 
 	// concurrency control
 	wNeedBytes chan []byte
-	rpk        *protocol.ShakeHandMsg
+	rpk        *protocol.HandShakeMsg
 	rSignal    chan bool
 
 	// check for timestamp
-	ackTimCheck [8][]byte
+	ackTimCheck *[8][]byte
+	pingRef     int64
 	ackRec      int
 }
 

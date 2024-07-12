@@ -6,5 +6,6 @@ local:
   AsymmetricCipher: "sm2"
   StreamCipher: "zuc"
   HashCipher: "sha256"
+  CompressedAlgorithm: "null"
   AccessToken: "123456789"
   

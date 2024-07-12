@@ -8,10 +8,10 @@ import (
 	"net"
 	"time"
 
-	cryptoprotect "selfproxy/cryptoProtect"
-	defErr "selfproxy/defErr"
-	protocol "selfproxy/protocol"
-	utils "selfproxy/utils"
+	cryptoprotect "bingoproxy/cryptoProtect"
+	defErr "bingoproxy/defErr"
+	protocol "bingoproxy/protocol"
+	utils "bingoproxy/utils"
 )
 
 type ClientControlMsg struct {

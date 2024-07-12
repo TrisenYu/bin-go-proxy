@@ -23,7 +23,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	utils "selfproxy/utils"
+	utils "bingoproxy/utils"
 
 	"golang.org/x/sys/windows"
 )

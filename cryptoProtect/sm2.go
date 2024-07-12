@@ -8,7 +8,7 @@ import (
 	"errors"
 	"math/big"
 
-	utils "selfproxy/utils"
+	utils "bingoproxy/utils"
 
 	"github.com/emmansun/gmsm/sm2"
 )

@@ -6,7 +6,7 @@ import (
 	"log"
 	"testing"
 
-	utils "selfproxy/utils"
+	utils "bingoproxy/utils"
 )
 
 func TestCiphers(t *testing.T) {

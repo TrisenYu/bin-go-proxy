@@ -145,6 +145,10 @@ func MinInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~in
 	return b
 }
 
+func AbsMinusInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16](a T, b T) T {
+	return MaxInt(a, b) - MinInt(a, b)
+}
+
 // get absolute path of current `utils.go`
 func GetRunPath() (string, error) {
 	path, err := filepath.Abs(filepath.Dir(os.Args[0]))

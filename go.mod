@@ -1,4 +1,4 @@
-module selfproxy
+module bingoproxy
 
 go 1.21
 
