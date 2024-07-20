@@ -76,7 +76,10 @@ func (c *Client) DeleteChannel() {
 }
 
 func (c *Client) EncWrite(plaintext []byte) (uint, error) {
-	enc := c.StreamCipher.EncryptFlow(plaintext)
+	enc, err := c.StreamCipher.EncryptFlow(plaintext)
+	if err != nil {
+		return 0, err
+	}
 	cnt, err := c.MiProxy.Write(enc)
 	return cnt, err
 }
@@ -84,10 +87,10 @@ func (c *Client) EncWrite(plaintext []byte) (uint, error) {
 func (c *Client) DecRead() ([]byte, uint, error) {
 	enc, cnt, err := c.MiProxy.Read()
 	if cnt == 0 || err != nil {
-		return []byte(``), 0, defErr.Concat(err, `or read empty enc-bytes`)
+		return []byte{}, 0, defErr.Concat(err, `or read empty enc-bytes`)
 	}
-	dec := c.StreamCipher.DecryptFlow(enc)
-	return dec, cnt, nil
+	dec, err := c.StreamCipher.DecryptFlow(enc)
+	return dec, cnt, err
 }
 
 func (c *Client) sendPub() error {

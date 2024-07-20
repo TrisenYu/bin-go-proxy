@@ -4,8 +4,6 @@ package cryptoprotect
 
 import "crypto/rand"
 
-// TODO: error should pass to upper layer rather than simply invoke panic().
-
 type AsymmCipher interface {
 	// Generate key pair for certain instance.
 	GenerateKeyPair()
@@ -52,10 +50,10 @@ type StreamCipher interface {
 	GetKey() []byte
 
 	// encrypt message and output without IV.
-	EncryptFlow(msg []byte) []byte
+	EncryptFlow(msg []byte) ([]byte, error)
 
 	// decrypt message. There is no IV in the payload.
-	DecryptFlow(msg []byte) []byte
+	DecryptFlow(msg []byte) ([]byte, error)
 }
 
 type HashCipher interface {

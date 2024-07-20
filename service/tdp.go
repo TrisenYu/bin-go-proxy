@@ -7,15 +7,17 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	cryptoprotect "bingoproxy/cryptoProtect"
-	"bingoproxy/utils"
+	utils "bingoproxy/utils"
 )
 
 /*
 udp + **trusted** transmission
-TODO: validate on real machine and see whether this protocol is able to bypass ISP QoS
+TODO:
+	write a concrete and specific unit test and validate on real machine and see whether this protocol is able to bypass ISP QoS
+
 
 The windows size or group size is intensionally fixed to 64 for simplifying
 the process of adjusting windows size, congestion control and fast retransmission first defined in TCP.
@@ -42,20 +44,20 @@ For interference attacked via forged packets (Eg. forged and malicious ack, rst)
 
 	Though there may be inevitable overhead of extra consumption on memory...
 
-                            +----> I think the possibility of lossing all sending windows is impossible
-		          4 bytes   |   d c
-	         4 bytes        |   0 1                     0-1023 s 10 bits 1000*1000
-	         n    n         |    b b b b b b b b        0-1023ms 10 bits 1000
-	         _u    u     uint64  i i i i i i i i        0-1023us 10 bits => (0, 0x3D095DD7) us => (u)int32
-	         _ m    m    8 bytes t t t t t t t t
-	  4 bytes_  b    b   ?                           4bytes 3 byte
-	+--------+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
-	|assigned|S   |A   |current |t|a|r|r|s|f|p|-| -|-|Prom|seed4|
-	|        |  E |  C | group  |y|c|c|s|y|i|m|-| -|-|ise-|obsc-|
-	|uniqueID|   Q|   K|recv-num|p|k|k|t|n|n|s|-| -|-|time|uring|
-	+--------+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
+                                +----> I think the possibility of lossing all sending windows is impossible
+                      4 bytes   |   d c
+                 4 bytes        |   0 1                     0-1023 s 10 bits 1000*1000
+                 n    n         |    b b b b b b b b        0-1023ms 10 bits 1000
+                 _u    u     uint64  i i i i i i i i        0-1023us 10 bits => (0, 0x3D095DD7) us => (u)int32
+                 _ m    m    8 bytes t t t t t t t t
+     2B   4 bytes_  b    b   ?                           4bytes 3 byte
+    +---+--------+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
+    |L  |assigned|S   |A   |current |t|a|r|r|s|f|p|-| -|-|Prom|seed4|
+    | E |        |  E |  C | group  |y|c|c|s|y|i|m|-| -|-|ise-|obsc-|
+    |  N|uniqueID|   Q|   K|recv-num|p|k|k|t|n|n|s|-| -|-|time|uring|
+    +---+--------+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
 
-TODO: define the maximum time and ensure the adequate bit for representation.
+	 2 + 4 + 4 + 4 + 8 + 1 + 4 + 3 = 30
 Eg. 1 min 30 s ==> 90 s, 600 ms,
 
     30 s 65 ms 74 us => 30_000_000_000 => 30 s imprecise and hard to determine the MITM.
@@ -68,337 +70,409 @@ Assume the sec domain can not exccedd 5 sec.
 
 This preamble can ought to be compressed after a successfully handshake.
 
+inflow may be invalid or valid.
+For the valid parts, the critera are defined by basic semanteme and methods to prevent or mitigate:
+	(syn|fin)-DDos attack, MITM, eg. eavesdrop/faisfy/masquerade communication parties.
+
+	- 0000 + SEQ + 0000 + 0000_0000 + _typ | _syn | _pms + promisedTimeVal(less than 5 seconds) + Seed:
+		represent the willing of establishing a connection with current host.
+		seed is used for protecting the subsequent messages.
+
+	- ID + SEQ + ACK + 0000_0000 + _typ | _syn | _pms | _ack + promisedTimeVal(less than 5 seconds as well) + Seed:
+		positive response of request for establishing a connection.
+		Before sending, any sender should validate the legitimacy of timeval from source.
+		At most record the generated id, initial seq, ack, refPing and seed after passing the last stage.
+
+	- 0000 + 0000 + ACK + 0000_0000 + _typ | _rst ==> certain udp addr of instigator:
+		abort the connection without any explanation
+		any sender uses this before removing abstract and malicious items from queues.
+
+	- ID + SEQ + ACK + 0000_0000 + _typ | _ack + first_payload(optional but not recommanded):
+		connection has been set up.
+	========================== no timeout-retransmission stage during first handshake ===========================
+
+	- ID + SEQ + ACK + curr_ack_cond + _ack + payload:
+		sender needs resending the packet according to curr_ack_cond and wait for SEQ + x.
+		x is the last tag identified from curr_ack_cond.
+		receiver should check whether this packet is late or not.
+	- ID + SEQ + ACK + curr_ack_cond + _rck + payload:
+		a retransmitted packet after timeout.
+		receiver should check whether this packet has been received.
+
+1                  1                         N
+read_loop => parser(classifier) => handler1, handler2, handler3.
+                 1
+handlerx => innerEventSurveiller
+	1. feed the old connections or let it push a new timeoutEvent to the EventQueue.
+		maybe we can encapsulate an channel for later corresponding flow ?
+	2. Proactively remove the connection in half-sync queue or accepted queue in certain stage.
+
+innerEventSurveiller: remove timeout connections according to the item storing in the queue or just ignore.
+
+N               1
+handlerx => LazySafeWrite
+
 */
 
 type (
-	header_bit_domain byte
-	// as header.
-	TDPpreamble struct {
-		SEQ, ACK    uint32
-		CurrWinCond uint64
-		BitsDomain  byte
-		PromiseTime [5]byte
+	_bits_       byte
+	_sync_state_ byte
+
+	TDPConn struct {
+		Addr        *net.UDPAddr
+		ID, RefTime uint32
+		Seq, Ack    uint32
+		XorKey      [3]byte
+		SBuf, RBuf  *[]byte
+		AdmitChan   chan struct{}
 	}
-
-	// as conn entity.
-	TDPconn struct {
-		Addr        net.Addr
-		Quidx       uint32
-		seq_st      uint32
-		seq_ofs     uint32
-		ack_st      uint32
-		ack_ofs     uint32
-		Ifshakehand byte
-		// I think the info of control domain need to change all the time
-		// so that no one can easily launch an attack.
-		Xor_key [3]byte
-
-		Ref_time      uint32
-		Ref_time_unit uint8
-
-		RecvBuf *[]byte
-		SendBuf *[]byte
+	TDPTimeoutID struct {
+		CID uint32 // remote-connection-ID
+		PID uint32 // packet seq
+		/*
+			the state of different timeout.
+			- `t` for syncx timeout
+			- `p` for packet timeout
+		*/
+		State byte
 	}
-
-	// as listener?
-	TDP struct {
-		GlobalConn    net.UDPConn
-		GlobalShunter int
-
-		sucideSign      bool
-		lock4sucideSign sync.RWMutex
-
-		halfSync_lock    sync.RWMutex
-		handshake_cnt    int
-		established_lock sync.RWMutex
-		setup_cnt        int
-
-		priority_inverse map[uint32]uint32
-		halfsync_inverse map[uint32]uint32
-		halfsync_queue   *[]TDPconn // incoming flow asking for service
-		accept_queue     *[]TDPconn // flow that are queueing for interacting with application
+	TDPMapKey struct {
+		choice, idx uint32
+	}
+	TDPManager struct {
+		Listener           *net.UDPConn // read packet from infinite loop as a listener.
+		WriterLock         sync.Mutex   // protect the write side. WriteTo(msg, addr)
+		SucideReadSign     atomic.Bool
+		SucideParseSign    atomic.Bool
+		SucideHalfSyncSign atomic.Bool
+		SucideAcceptedSign atomic.Bool
+		SucideEventSign    atomic.Bool
+		InnerQueueCnt      [2]atomic.Int64
+		InnerQueue         sync.Map // [2]map[uint32]*EtdpConn => map{_sync_state, cnt} => *EtdpConn
+		IDreverser         sync.Map // [2]map[uint32]uint32 => map{_sync_state, EtdpConn -> ID} => cnt
+		EventHandler       *EventNotifyQueue
+		ParserQueue        *AddrMessageQueue // (read-flow, addr) enqueue parser for further works.
+		HalfSyncQueue      *ReverseIDMessageQueue
+		AcceptedQueue      *ReverseIDMessageQueue
 	}
 )
 
 const (
-	_typ            header_bit_domain = 128
-	_ack            header_bit_domain = 64
-	_rck            header_bit_domain = 32
-	_rst            header_bit_domain = 16
-	_syn            header_bit_domain = 8
-	_fin            header_bit_domain = 4
-	_pms            header_bit_domain = 2
-	GroupSize       int               = 64
-	AcceptQueueSize int               = 1024
-	RECV_ALL        uint64            = ^uint64(0)
+	TYP _bits_ = 128
+	SYN _bits_ = 64
+	ACK _bits_ = 32
+	RCK _bits_ = 16
+	RST _bits_ = 8
+	FIN _bits_ = 4
+	PMS _bits_ = 2
 )
 
-// return the bytes representation of header.
-func (tdph *TDPpreamble) Bytes() []byte {
-	res1 := utils.Uint32ToBytesInLittleEndian(tdph.SEQ)
-	res2 := utils.Uint32ToBytesInLittleEndian(tdph.ACK)
-	res3 := utils.Uint64ToBytesInLittleEndian(tdph.CurrWinCond)
+const (
+	SYNC1 _sync_state_ = iota
+	SYNC2
+	SYNC3 // connected.
+	FISH1
+	FISH2 // end of connection.
+)
 
-	res1 = append(res1, res2...)
-	res1 = append(res1, res3...)
-	res1 = append(res1, tdph.BitsDomain)
-
-	return res1
-}
-
-func (tdp *TDP) Accept() {
-}
-
-func (tdp *TDP) Close() {
-	curr := tdp.SafeReadSucideSign()
-	if curr {
-		tdp.SafeFlipSucideSign()
+func (tdp *TDPConn) SyncTimeout(expired time.Duration) interface{} {
+	timer := time.NewTimer(expired)
+	select {
+	case <-timer.C:
+		return TDPTimeoutID{CID: tdp.ID, State: byte('t')}
+	case res := <-tdp.AdmitChan:
+		return res
 	}
-	// TODO: free sources.
 }
 
-func (tdp *TDP) Addr() {
+func (tdp *TDPManager) DeleteItemInQueue(item TDPMapKey) {
+	tdp.InnerQueue.Delete(item)
+}
+
+func (tdp *TDPManager) DeleteIdxInMap(idx TDPMapKey) {
+	tdp.IDreverser.Delete(idx)
 }
 
 // read the sucide sign of udp listener
-func (tdp *TDP) SafeReadSucideSign() bool {
-	tdp.lock4sucideSign.RLock()
-	defer tdp.lock4sucideSign.RUnlock()
-	res := tdp.sucideSign
-	return res
+func (tdp *TDPManager) SafeReadSucideReadSign() bool {
+	return tdp.SucideReadSign.Load()
 }
 
 // flip the sucide sign of udp listener
-func (tdp *TDP) SafeFlipSucideSign() {
-	tdp.lock4sucideSign.Lock()
-	defer tdp.lock4sucideSign.Unlock()
-	tdp.sucideSign = !tdp.sucideSign
+func (tdp *TDPManager) SafeFlipSucideReadSign() {
+	var choice bool
+	if tdp.SafeReadSucideReadSign() {
+		choice = false
+	} else {
+		choice = true
+	}
+	tdp.SucideReadSign.Store(choice)
 }
 
 // init the sucide sign of udp listener
-func (tdp *TDP) initSucideSign() {
-	tdp.lock4sucideSign.Lock()
-	defer tdp.lock4sucideSign.Unlock()
-	tdp.sucideSign = true
+func (tdp *TDPManager) InitSucideReadSign() {
+	tdp.SucideReadSign.Store(true)
 }
 
-func (tdp *TDP) fastResend(idx uint32, status [8]byte) {
-	functor := func(counter uint32, now byte) {
-		var i uint32
-		for i = 0; i < 8; i++ {
-			if (now>>i)&1 == 1 {
-				continue
-			}
-			ptr := (*tdp.accept_queue)[idx]
-			tdp.GlobalConn.WriteToUDP([]byte{(*ptr.SendBuf)[counter*8+i]}, ptr.Addr.(*net.UDPAddr))
-		}
+// read the sucide sign of parser
+func (tdp *TDPManager) SafeReadSucideParseSign() bool {
+	return tdp.SucideParseSign.Load()
+}
+
+// flip the sucide sign of parser
+func (tdp *TDPManager) SafeFlipSucideParseSign() {
+	var choice bool
+	if tdp.SafeReadSucideParseSign() {
+		choice = false
+	} else {
+		choice = true
 	}
-	for i := 0; i < 8; i++ {
-		functor(idx, status[i])
+	tdp.SucideParseSign.Store(choice)
+}
+
+// init the sucide sign of parser
+func (tdp *TDPManager) InitSucideParseSign() {
+	tdp.SucideParseSign.Store(true)
+}
+
+// read the sucide sign of half-sync-queue
+func (tdp *TDPManager) SafeReadSucideHalfSyncSign() bool {
+	return tdp.SucideHalfSyncSign.Load()
+}
+
+// flip the sucide sign of half-sync-queue
+func (tdp *TDPManager) SafeFlipSucideHalfSyncSign() {
+	var choice bool
+	if tdp.SafeReadSucideHalfSyncSign() {
+		choice = false
+	} else {
+		choice = true
+	}
+	tdp.SucideHalfSyncSign.Store(choice)
+}
+
+// init the sucide sign of half-sync-queue
+func (tdp *TDPManager) InitSucideHalfSyncSign() {
+	tdp.SucideHalfSyncSign.Store(true)
+}
+
+// read the sucide sign of accepted-queue
+func (tdp *TDPManager) SafeReadSucideAcceptedSign() bool {
+	return tdp.SucideAcceptedSign.Load()
+}
+
+// flip the sucide sign of accepted-queue
+func (tdp *TDPManager) SafeFlipSucideAcceptedSign() {
+	var choice bool
+	if tdp.SafeReadSucideAcceptedSign() {
+		choice = false
+	} else {
+		choice = true
+	}
+	tdp.SucideAcceptedSign.Store(choice)
+}
+
+// init the sucide sign of accepted-queue
+func (tdp *TDPManager) InitSucideAcceptedSign() {
+	tdp.SucideAcceptedSign.Store(true)
+}
+
+// initialize the udpListener.
+func (tdp *TDPManager) InitLocalListener(udptype string, port uint16) (err error) {
+	tdp.Listener, err = net.ListenUDP(udptype,
+		&net.UDPAddr{
+			IP:   net.IPv6loopback,
+			Port: int(port),
+		})
+	return
+}
+
+func (tdp *TDPManager) ReadFlow() {
+	buf := make([]byte, 1024)
+	for tdp.SafeReadSucideReadSign() {
+		cnt, addr, err := tdp.Listener.ReadFromUDP(buf)
+		if cnt <= 0 || err != nil {
+			continue
+		}
+		var inp []byte
+		copy(inp, buf[:cnt])
+		tdp.ParserQueue.PushBack(AddrMessage{Addr: addr, Msg: inp})
 	}
 }
 
-func (tdp *TDP) semantemeInCtrlDomain(id uint32, surpass_ack [8]byte, bits header_bit_domain) (bool, string) {
-	switch bits {
-	case _ack:
-		tdp.fastResend(tdp.priority_inverse[id], surpass_ack)
-		return true, "data"
-	case _typ | _rst:
-		// remove packet from all queue
-		return true, "reset"
-	case _typ | _fin:
-		// actively disconnect with counterpart.
-		return true, "finish-1"
-	case _typ | _fin | _ack:
-		// response from counterpart.
-		return true, "finish-2"
-	default:
-		// drop invalid packet or determine whether removing the conn.
-		return false, ""
+// function for order writing.
+func (tdp *TDPManager) SafeWriteAny(msg []byte, addr *net.UDPAddr) (uint32, error) {
+	tdp.WriterLock.Lock()
+	cnt, err := tdp.Listener.WriteTo(msg, addr)
+	tdp.WriterLock.Unlock()
+	return uint32(cnt), err
+}
+
+func (tdp *TDPManager) AcceptedHandler() {
+	// accept-sync loop.
+	for tdp.SafeReadSucideAcceptedSign() {
+		ac_msg := tdp.AcceptedQueue.PopFront()
+		idx, msg := ac_msg.Idx, ac_msg.Msg
+		// conn := tdp.InnerQueue[SYNC1][idx]
+		log.Println(idx, msg)
 	}
 }
 
-func (tdp *TDP) ParseConn(addr net.Addr, msg []byte) (bool, string) {
-	if len(msg) < 4+4+4+8+1 {
-		return false, ""
+func (tdp *TDPManager) HalfSyncHandler() {
+	// fetch from half-sync queue.
+	for tdp.SafeReadSucideHalfSyncSign() {
+		hs_msg := tdp.AcceptedQueue.PopFront()
+		idx, msg := hs_msg.Idx, hs_msg.Msg
+		// TODO
+		log.Println(idx, msg)
 	}
+}
 
-	var (
-		extented_algebra = func(inp [3]byte, oup []byte) {
-			for i := 0; i < 3; i++ {
-				oup[i] = inp[i]
-			}
-			for i := 3; i < 17; i++ {
-				oup[i] = ((oup[i-1] << 1) + (^oup[i-3] << 5) + cryptoprotect.S_Box[oup[i-2]]) & 0xFF
-			}
-			for i := 0; i < 3; i++ {
-				inp[i] = oup[16-i]
-			}
-		}
-		xorer_with_limit = func(inp, oup []byte, l, r int) {
-			for i := l; i < r; i++ {
-				oup[i] ^= inp[i-4]
-			}
-		}
-	)
-	__seq, __ack := [4]byte(msg[4:8]), [4]byte(msg[8:12])
-	id := utils.BytesToUint32([4]byte(msg[:4]))
-	_ctrl_bits := header_bit_domain(msg[20])
-
-	val, ok := tdp.priority_inverse[id]
-	if ok {
-		/* has been in accept_queue. So the control domain has been sealed. */
-		_curr_num := [8]byte(msg[12:20])
-
-		session_key := (*tdp.accept_queue)[val].Xor_key
-		_17_exkey := make([]byte, 17)
-		extented_algebra(session_key, _17_exkey)
-		xorer_with_limit(_17_exkey, __seq[:], 4, 8)
-		xorer_with_limit(_17_exkey, __ack[:], 8, 12)
-		xorer_with_limit(_17_exkey, _curr_num[:], 12, 20)
-		(*tdp.accept_queue)[val].Xor_key = session_key
-
-		ack := (*tdp.accept_queue)[val].ack_st + (*tdp.accept_queue)[val].ack_ofs
-		seq := (*tdp.accept_queue)[val].seq_st + (*tdp.accept_queue)[val].seq_ofs
-
-		Seq, Ack := utils.BytesToUint32(__seq), utils.BytesToUint32(__ack)
-		if Seq != seq+1 || Ack != ack+1 {
-			// TODO: turn this over mind
-			return false, ""
-		}
-
-		flag, _type := tdp.semantemeInCtrlDomain(val, _curr_num, _ctrl_bits)
-		if !flag {
-			return false, ""
-		}
-		switch _type {
-		case `reset`:
-			return true, _type
-		}
-
+func (tdp *TDPManager) RookieHandler(addr *net.UDPAddr, msg []byte) {
+	lena := utils.BytesToUint16([2]byte(msg[:2]))
+	if lena != 2+4+4+4+8+1+ /*promisedTimeVal*/ 4+ /*CryptoSeed*/ 3 {
+		return // drop this packet.
 	}
-	switch _ctrl_bits {
-	case _typ | _syn | _pms:
+	/* advancedAck := msg[14:22] */
+	ctrl_bits := _bits_(msg[22])
+	switch ctrl_bits {
+	case TYP | SYN | PMS:
 		ping_ref, valid := PingWithoutPrint(addr.String(), 3, 5, 5)
-		if !valid || len(msg) < 4+4+4+8+1+4+3 {
-			// suspect: mischief
-			return false, ""
+		// the validation of accessibility.
+		if !valid {
+			return
 		}
-		promise_time := msg[21:25]
-		sec := int64(promise_time[0]) | (int64(promise_time[1]&0x3) << 8)
-		mil := int64(promise_time[1]>>2) | (int64(promise_time[2]&0xF) << 8)
-		mic := int64(promise_time[2]>>4) | int64(promise_time[3]&0x3F)
+		// TODO: seed := [3]byte(msg[27:30])
+		pms_val := msg[23:27]
+		sec := int64(pms_val[0]) | (int64(pms_val[1]&0x3) << 8)
+		mil := int64(pms_val[1]>>2) | (int64(pms_val[2]&0xF) << 8)
+		mic := int64(pms_val[2]>>4) | int64(pms_val[3]&0x3F)
 		us := mic + mil*1000 + sec*1000000
 
-		if utils.AbsMinusInt(us, ping_ref)*2 >= ping_ref*3 /* || us > 5sec */ {
-			return false, ""
+		if utils.AbsMinusInt(us, ping_ref)*2 >= ping_ref*3 {
+			// semanteme validation failed.
+			return
 		}
+		seq := msg[6:10]
 		assigned_id := make([]byte, 4)
+	regain:
 		rand.Read(assigned_id)
 		curr_id := utils.BytesToUint32([4]byte(assigned_id))
+		_, ok := tdp.IDreverser.Load(TDPMapKey{choice: uint32(SYNC1), idx: curr_id})
+		if ok {
+			goto regain
+		}
+		_, ok = tdp.IDreverser.Load(TDPMapKey{choice: uint32(SYNC2), idx: curr_id})
+		if ok {
+			goto regain
+		}
+		mean_time := uint32((ping_ref + us)) >> 1
+		// TODO: adjust time if necessary.
+		// 		 md5.Sum(seq||addr.string()||refTime)[4:] as seq.
+		// 		 Generate seed for the sender.
+		record := TDPConn{
+			Addr:    addr,
+			ID:      curr_id,
+			RefTime: mean_time,
+			Seq:     utils.BytesToUint32([4]byte(seq)),
+			Ack:     utils.BytesToUint32([4]byte(seq)),
+		}
+		// the packet should seal the assign ID and seed for subsequent usage.
 
-		tdp.halfSync_lock.Lock()
-		(*tdp.halfsync_queue)[tdp.handshake_cnt].Ref_time = uint32(ping_ref)
-		tdp.halfsync_inverse[curr_id] = uint32(tdp.handshake_cnt)
-		tdp.handshake_cnt += 1
-		tdp.halfSync_lock.Unlock()
-		// It is the first time to flow in. check and verified the promised time and attempt to allocate.
-		// seed := msg[25:28]
-		// TODO: Need to write back (ack, promiseTime, id, seed) and generate sessionKey.
-		return true, "synchronous-1"
-	case _typ | _ack | _syn | _pms:
-		// TODO: the two parties need generate session key.
-		return true, "synchronous-2"
-	case _typ | _ack:
-		return true, "synchronous-3"
-	case _typ | _rst:
-		// a new connection attempt to reset connection?
-		return true, `reset`
+		// TODO: CNT 限制。
+		tdp.InnerQueueCnt[0].Add(1)
+		cnt := tdp.InnerQueueCnt[0].Load()
+		tdp.IDreverser.Store(TDPMapKey{choice: uint32(SYNC1), idx: curr_id}, cnt)
+		tdp.InnerQueue.Store(TDPMapKey{choice: uint32(SYNC1), idx: uint32(cnt)}, &record)
+
+		go func() {
+			// TODO: SafeWriteBack TYP | SYN | ACK | PMS.
+			tdp.EventHandler.PushBack(
+				record.SyncTimeout(time.Duration(record.RefTime) * time.Microsecond))
+		}()
 	default:
-		return false, ``
+		return
 	}
 }
 
-func (tdp *TDP) Listen(udpType string, port uint16) error {
-	var choice net.IP
-	switch udpType {
-	case "udp":
-		choice = []byte{127, 0, 0, 1}
-	case "udp6":
-		choice = net.IPv6loopback
+func (tdp *TDPManager) EventAnalyzer() {
+	for {
+		tdp.EventHandler.PopFront()
 	}
-	conn, err := net.ListenUDP(udpType, &net.UDPAddr{IP: choice, Port: int(port)})
-	if err != nil {
-		return err
-	}
-	tdp.GlobalConn = *conn
-	return nil
 }
 
-func (tdp *TDP) InflowShunter() {
-	msgBuf := make([]byte, 1024)
-	tdp.initSucideSign()
-	for tdp.SafeReadSucideSign() {
-
-		_, addr, err := tdp.GlobalConn.ReadFromUDP(msgBuf)
-		if err != nil {
-			log.Println(err)
+func (tdp *TDPManager) Parser() {
+	for tdp.SafeReadSucideParseSign() {
+		_msg := tdp.ParserQueue.PopFront()
+		msg, addr := _msg.Msg, _msg.Addr
+		if msg == nil || len(msg) <= 2+4+4+4+8+1 {
 			continue
 		}
-		flag, _type := tdp.ParseConn(addr, msgBuf)
-		if !flag {
-			// drop this.
+
+		id := utils.BytesToUint32([4]byte(msg[2:6]))
+		// TODO: if there are any risks generated from tons of concurrency
+		// 		 caused by malicious or undeliberate operation ?
+
+		/* condition-1: accepted */
+		_idx, ok := tdp.IDreverser.Load(TDPMapKey{choice: uint32(SYNC2), idx: id})
+		if ok {
+			var inp []byte
+			idx := _idx.(uint32)
+			copy(inp, msg)
+			go func() { tdp.AcceptedQueue.PushBack(ReverseIDMessage{idx, inp}) }()
 			continue
 		}
-		switch _type {
-		case "handshake":
-			tdp.halfSync_lock.Lock()
-			(*tdp.halfsync_queue)[tdp.handshake_cnt] = TDPconn{Addr: addr, Quidx: uint32(tdp.handshake_cnt)}
-			tdp.handshake_cnt += 1
-			tdp.halfSync_lock.Unlock()
-		case "setup":
-			tdp.established_lock.Lock()
-			(*tdp.accept_queue)[tdp.setup_cnt] = TDPconn{Addr: addr, Quidx: uint32(tdp.setup_cnt)}
-			tdp.handshake_cnt += 1
-			tdp.established_lock.Unlock()
-		case "data":
-			// TODO
+
+		/* condition-2: half-connected */
+		_idx, ok = tdp.IDreverser.Load(TDPMapKey{choice: uint32(SYNC1), idx: id})
+		if ok {
+			// TODO: update addr if necessary.
+			var inp []byte
+			idx := _idx.(uint32)
+			copy(inp, msg)
+			go func() { tdp.HalfSyncQueue.PushBack(ReverseIDMessage{idx, inp}) }()
+			continue
 		}
+
+		/* condition-3: first come in. */
+		go func() { tdp.RookieHandler(addr, msg) }()
 	}
 }
 
-/* ---------------------------------- TDPconn -------------------------------------------- */
+func (tdp *TDPManager) Comprehensive() {
+	var wg sync.WaitGroup
+	wg.Add(4)
 
-// trusted read
-func (tdp *TDPconn) Read(b []byte) (n int, err error) {
-	return 0, nil
+	go func() {
+		/* listening to die signal and turn on sucide sign. */
+		// TODO
+		wg.Done()
+	}()
+	go func() {
+		/* parse-loop */
+		tdp.Parser()
+		wg.Done()
+	}()
+	go func() {
+		/* halfsync-loop */
+		tdp.HalfSyncHandler()
+		wg.Done()
+	}()
+	go func() {
+		/* accepted-loop*/
+		tdp.AcceptedHandler()
+		wg.Done()
+	}()
+	tdp.ReadFlow()
+	wg.Wait()
 }
 
-// trusted write
-func (tdp *TDPconn) Write(b []byte) (n int, err error) {
-	return 0, nil
+func (tdp *TDPConn) Write(b []byte) (cnt int, err error) {
+	// TODO
+	return
 }
 
-func (tdp *TDPconn) Close() error {
-	return nil
-}
-
-func (tdp *TDPconn) LocalAddr() net.Addr {
-	return nil
-}
-
-func (tdp *TDPconn) RemoteAddr() net.Addr {
-	return nil
-}
-
-func (tdp *TDPconn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-func (tdp *TDPconn) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (tdp *TDPconn) SetReadDeadline(t time.Time) error {
-	return nil
+func (tdp *TDPConn) Read() (cnt int, err error) {
+	// TODO
+	return
 }

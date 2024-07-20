@@ -19,14 +19,14 @@ func TestCiphers(t *testing.T) {
 	test_cipher.SetIv(iv)
 
 	helo := "hello words!!!!!!I am the storm that is approaching"
-	res := test_cipher.EncryptFlow([]byte(helo))
-	res1 := test_cipher.EncryptFlow([]byte(helo))
+	res, _ := test_cipher.EncryptFlow([]byte(helo))
+	res1, _ := test_cipher.EncryptFlow([]byte(helo))
 	log.Println(`res: `)
 	utils.BytesHexForm(res)
 	log.Println(`res1: `)
 	utils.BytesHexForm(res1)
-	dec := test_cipher.DecryptFlow(res)
-	dec1 := test_cipher.DecryptFlow(res1)
+	dec, _ := test_cipher.DecryptFlow(res)
+	dec1, _ := test_cipher.DecryptFlow(res1)
 
 	log.Println(`decrypt from res: `)
 	utils.BytesHexForm(dec)
@@ -46,14 +46,14 @@ func TestSalsa20(t *testing.T) {
 	test_cipher.SetIv(iv)
 
 	helo := "hello words!!!!!!I am the storm that is approaching"
-	res := test_cipher.EncryptFlow([]byte(helo))
-	res1 := test_cipher.EncryptFlow([]byte(helo))
+	res, _ := test_cipher.EncryptFlow([]byte(helo))
+	res1, _ := test_cipher.EncryptFlow([]byte(helo))
 	log.Println(`res: `)
 	utils.BytesHexForm(res)
 	log.Println(`res1: `)
 	utils.BytesHexForm(res1)
-	dec := test_cipher.DecryptFlow(res)
-	dec1 := test_cipher.DecryptFlow(res1)
+	dec, _ := test_cipher.DecryptFlow(res)
+	dec1, _ := test_cipher.DecryptFlow(res1)
 
 	log.Println(`decrypt from res: `)
 	utils.BytesHexForm(dec)

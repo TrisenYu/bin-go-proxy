@@ -15,7 +15,7 @@ type Socket struct {
 
 func (s *Socket) Read() ([]byte, uint, error) {
 	if s.Conn == nil {
-		return []byte(``), 0, errors.New(`tried to write on an empty connection`)
+		return []byte{}, 0, errors.New(`tried to write on an empty connection`)
 	}
 	res := make([]byte, 2048)
 	cnt, err := s.Conn.Read(res)

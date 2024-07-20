@@ -49,7 +49,7 @@ const (
 
 const (
 	PICK_NULL_COMP compressed_choice = iota + 1 // no need for compression algorithm
-	PICK_ZLIB_COMP                              // zstd compression
+	PICK_ZLIB_COMP                              // zlib compression
 )
 
 var S_Box = [...]byte{

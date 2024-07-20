@@ -30,7 +30,7 @@ type ZUC struct {
 	decstream cipher.Stream
 }
 
-func (_zuc *ZUC) EncryptFlow(msg []byte) []byte {
+func (_zuc *ZUC) EncryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 	extend_iv := [zuc.IVSize256]byte{}
 	copy(extend_iv[:IVSize], _zuc.Iv[:])
@@ -38,15 +38,15 @@ func (_zuc *ZUC) EncryptFlow(msg []byte) []byte {
 	if _zuc.encstream == nil {
 		stream, err := zuc.NewCipher(_zuc.Key[:], extend_iv[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		_zuc.encstream = stream
 	}
 	_zuc.encstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
-func (_zuc *ZUC) DecryptFlow(msg []byte) []byte {
+func (_zuc *ZUC) DecryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 	extend_iv := [zuc.IVSize256]byte{}
 	copy(extend_iv[:IVSize], _zuc.Iv[:])
@@ -54,12 +54,12 @@ func (_zuc *ZUC) DecryptFlow(msg []byte) []byte {
 	if _zuc.decstream == nil {
 		stream, err := zuc.NewCipher(_zuc.Key[:], extend_iv[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		_zuc.decstream = stream
 	}
 	_zuc.decstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
 func (_zuc *ZUC) SetKey(key []byte) {

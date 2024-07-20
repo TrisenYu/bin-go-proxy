@@ -62,7 +62,10 @@ func (p *EncFlowProxy) SendPub() error {
 }
 
 func (ep *EncFlowProxy) EncWrite2Client(plaintext []byte) (uint, error) {
-	enc := ep.StreamCipher.EncryptFlow(plaintext)
+	enc, err := ep.StreamCipher.EncryptFlow(plaintext)
+	if err != nil {
+		return 0, err
+	}
 	cnt, err := ep.Client.Write(enc)
 	return cnt, err
 }
@@ -70,10 +73,10 @@ func (ep *EncFlowProxy) EncWrite2Client(plaintext []byte) (uint, error) {
 func (ep *EncFlowProxy) DecReadViaClient() ([]byte, uint, error) {
 	enc, cnt, err := ep.Client.Read()
 	if cnt == 0 || err != nil {
-		return []byte(``), 0, errors.Join(err, errors.New(`got empty enc-string from client`))
+		return []byte{}, 0, errors.Join(err, errors.New(`got empty enc-string from client`))
 	}
-	dec := ep.StreamCipher.DecryptFlow(enc)
-	return dec, cnt, nil
+	dec, err := ep.StreamCipher.DecryptFlow(enc)
+	return dec, cnt, err
 }
 
 func (p *EncFlowProxy) SendRemote(msg []byte) (uint, error) {

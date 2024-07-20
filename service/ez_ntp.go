@@ -40,7 +40,7 @@ const ntpEpochOffset = 2208988800
 // |                                                               |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-var ntp_server_list = [...]string{
+var ntp_server_list = []string{
 	"time.windows.com:123",
 	"time.apple.com:123",
 	"time.cloudflare.com:123",

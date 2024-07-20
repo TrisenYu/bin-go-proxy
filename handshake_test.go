@@ -37,7 +37,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 			t.Error(err.Error())
 			return
 		}
-		dialer.SetReadDeadline(time.Now().Add(time.Second * 5)) // 本地 5 s，线上 10 s
+		dialer.SetReadDeadline(time.Now().Add(time.Second * 5))
 		cp_con <- dialer
 	}()
 

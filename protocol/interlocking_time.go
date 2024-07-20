@@ -12,8 +12,9 @@ import (
 
 const (
 	/* Ten thousand year with the same format as long as all systems are ongoing. */
-	TIME_FORMAT      string = "2006-01-02 15:04:05.000000"
-	TIME_ZONE_STRING string = "Asia/Shanghai"
+	TIME_FORMAT                 string = "2006-01-02 15:04:05.000000"
+	TIME_ZONE_STRING            string = "Asia/Shanghai"
+	CHOPPING_LENGTH_OF_HASH_VAL uint64 = 8
 
 	/*
 		Do not send the plaintext but send the injective result generated from hash(ack+timesalt).
@@ -87,11 +88,11 @@ func (t *SharedTimeFormat) SafeSetTimeFromTimeStamp(inp time.Time) {
 	t.mutter.Unlock()
 }
 
-// hash(timestamp + ack)[:4] => send with timestamp as current ack
+// hash(timestamp + ack)[:CHOPPING_LENGTH_OF_HASH_VAL] => send with timestamp as current ack
 func AckToTimestampHash(hash_fn cryptoprotect.HashCipher, ack_payload []byte) (time_salt []byte, res []byte) {
 	time_salt = []byte(calibrated_time_accesser())
 	_res := hash_fn.CalculateHash(append(time_salt, ack_payload...))
-	res = _res[:4]
+	res = _res[:CHOPPING_LENGTH_OF_HASH_VAL]
 	return
 }
 
@@ -161,7 +162,7 @@ func AckFlowValidation(
 	hasCryptoBurden bool,
 ) bool {
 	time_len := TIME_LEN.SafeReadTimeLen()
-	if uint64(len(ack_flow)) != time_len+4 {
+	if uint64(len(ack_flow)) != time_len+CHOPPING_LENGTH_OF_HASH_VAL {
 		return false
 	}
 	time_salt := make([]byte, time_len+8)
@@ -169,10 +170,10 @@ func AckFlowValidation(
 	if hasSaved(time_salt[:time_len], stage_ack, tmpTimeStamps, rec_cnt, ping_val, hasCryptoBurden) {
 		return false
 	}
-	trunc_it := ack_flow[time_len : time_len+4]
+	trunc_it := ack_flow[time_len : time_len+CHOPPING_LENGTH_OF_HASH_VAL]
 	copy(time_salt[time_len:time_len+8], stage_ack)
 	check_it := hash_fn.CalculateHash(time_salt)
-	flag, _ := utils.CompareByteSliceEqualOrNot(check_it[:4], trunc_it)
+	flag, _ := utils.CompareByteSliceEqualOrNot(check_it[:CHOPPING_LENGTH_OF_HASH_VAL], trunc_it)
 	return flag
 }
 

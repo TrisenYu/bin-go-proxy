@@ -4,7 +4,6 @@ package proxy
 
 import (
 	"errors"
-	"log"
 	"time"
 
 	cryptoprotect "bingoproxy/cryptoProtect"
@@ -17,8 +16,8 @@ import (
 
 /*
 TODO: speed limitation for preventing DDos.
-	we need tact for single ip
-		 		 for fake ips
+    we need tact for single ip
+                 for fake ips
 */
 
 /*
@@ -73,7 +72,6 @@ func (ep *EncFlowProxy) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg,
 
 func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from config*/ ) error {
 	client_hello, _, _ := ep.Client.Read()
-	// TODO: TokenLen gain from config. Otherwise the authentication is not used at all.
 	/*
 		if cnt != 4+auth.TokenLen || err != nil {
 			return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
@@ -209,13 +207,15 @@ func (ep *EncFlowProxy) writeStep1() error {
 func (ep *EncFlowProxy) readStep1() error {
 	ackppub, _, err := ep.Client.Read()
 	if !protocol.AckFlowValidation(
-		ep.HashCipher, ackppub,
+		ep.HashCipher,
+		ackppub,
 		[]byte(protocol.ACKPPUB),
 		ep.ackTimCheck,
 		&ep.ackRec,
-		ep.pingRef, false) {
+		ep.pingRef,
+		false) {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`unexpected cnt or err:`, err)
+		return defErr.DescribeThenConcat(protocol.FAILED_TO_VALIDATE_ACKPPUB, err)
 	}
 	return nil
 }
@@ -224,13 +224,13 @@ func (ep *EncFlowProxy) readStep1() error {
 func (ep *EncFlowProxy) readStep2() error {
 	pub, _, err := ep.Client.Read()
 	if err != nil {
-		ep.wNeedBytes <- []byte(``)
+		ep.wNeedBytes <- []byte{}
 		ep.Client.CloseAll()
-		return err
+		return defErr.DescribeThenConcat(protocol.FAILED_TO_RECV_COMPRESSED_CPUB, err)
 	}
 	p, err := ep.CompOption.DecompressMsg(pub)
 	if err != nil {
-		ep.wNeedBytes <- []byte(``)
+		ep.wNeedBytes <- []byte{}
 		ep.Client.CloseAll()
 		return err
 	}
@@ -247,10 +247,9 @@ func (ep *EncFlowProxy) writeStep2() error {
 	}
 	now, curr_ack := protocol.AckToTimestampHash(ep.HashCipher, []byte(protocol.ACKCPUB))
 	now = append(now, curr_ack...)
-	// TODO: compress hash or not only for pubkey but should compress all?
 	// From the perspective of information theory, the entropy of ciphertext is rather higher than plaintext
 	// and therefore ciphertext is more likely in arousing the suspicion.
-	// Nevertheless, I think the sliced handshake payload will need this.
+	// Nevertheless, I think the sliced handshake payload will need compressing.
 	cnt, err := ep.Client.Write(now)
 	if cnt != uint(len(now)) || err != nil {
 		ep.Client.CloseAll()
@@ -270,7 +269,7 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 	cnt, err := ep.Client.Write(pf)
 	if err != nil || cnt != uint(len(pf)) {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_SEND_PFLOW, err)
+		return defErr.DescribeThenConcat(protocol.FAILED_TO_SEND_COMPRESSED_PFLOW, err)
 	}
 	// log.Println(`wait pflow`, turn)
 	pack := <-ep.wNeedBytes
@@ -281,7 +280,7 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKPPK2)
 	default:
-		return errors.New(protocol.INTERLOCKING_TURN_INVALID_ACKPFLOW)
+		return errors.New(protocol.BILATERY_INVALID_ACKPFLOW)
 	}
 
 	if !protocol.AckFlowValidation(
@@ -297,10 +296,11 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 // step3 recv ackpflow1 | ackpflow2
 func (ep *EncFlowProxy) readStep4() error {
 	ackppk, cnt, err := ep.Client.Read()
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
-		ep.wNeedBytes <- []byte(``)
+	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
+		err != nil {
+		ep.wNeedBytes <- []byte{}
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`ackpck failed or err:`, err)
+		return defErr.DescribeThenConcat(protocol.FAILED_TO_PARSE_ACKPFLOW, err)
 	}
 	ep.wNeedBytes <- ackppk
 	return nil
@@ -315,18 +315,19 @@ func (ep *EncFlowProxy) writeStep3(turn int) error {
 	case 2:
 		choice = []byte(protocol.ACKCPK2)
 	default:
-		return errors.New(protocol.PROXY_PREFIX + protocol.INTERLOCKING_TURN_INVALID_ACKCFLOW)
+		return errors.New(protocol.P_PREFIX + protocol.BILATERY_INVALID_ACKCFLOW)
 	}
 	if !<-ep.rSignal {
 		ep.Client.CloseAll()
-		return errors.New(`failed to recv cpack which is accessed from ep.rSignal`)
+		return errors.New(protocol.P_PREFIX + protocol.BILATERY_INNER_SIGNAL_FAILED)
 	}
 	curr, res := protocol.AckToTimestampHash(ep.HashCipher, choice)
 	cnt, err := ep.Client.Write(append(curr, res...))
 
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
+	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
+		err != nil {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`incorrectly send ack-cpk`, err)
+		return defErr.DescribeThenConcat(protocol.FAILED_TO_SEND_ACKCFLOW, err)
 	}
 	return nil
 }
@@ -337,13 +338,13 @@ func (ep *EncFlowProxy) readStep3() ([]byte, error) {
 	if err != nil {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
-		return []byte(``), err
+		return []byte{}, err
 	}
 	cflow, err := ep.CompOption.DecompressMsg(cf)
 	if err != nil {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
-		return []byte(``), err
+		return []byte{}, err
 	}
 	ep.rSignal <- true
 	return cflow, nil
@@ -355,12 +356,12 @@ func (ep *EncFlowProxy) rnAndDecrypt(cpk1, cpk2 []byte) (*protocol.HandShakeMsg,
 	rn_pck, err := ep.decryptHandShakeMsg(cpk)
 	if err != nil {
 		ep.Client.CloseAll()
-		return nil, defErr.DescribeThenConcat(`client-pem-decrypt failed:`, err)
+		return nil, defErr.DescribeThenConcat(protocol.P_PREFIX+protocol.BILATERY_PEM_DECRYPTION_FAILED, err)
 	}
 	rn, err := ep.extractHandShakeMsg(rn_pck)
 	if err != nil {
 		ep.Client.CloseAll()
-		return nil, defErr.DescribeThenConcat(`extract-rn failed`, err)
+		return nil, defErr.DescribeThenConcat(protocol.FAILED_TO_EXTRACT_RN, err)
 	}
 	return rn, nil
 }
@@ -370,7 +371,7 @@ func (ep *EncFlowProxy) recheckHash(rn *protocol.HandShakeMsg) error {
 	verified := ep.ClientAsymmCipher.PubVerify(rn.Hasher[:], rn.Signature[:])
 	if !verified {
 		ep.Client.CloseAll()
-		return errors.New(protocol.FAILED_TO_VERIFY_SIGNATURE)
+		return errors.New(protocol.BILATERY_SIGNATURE_FAILURE)
 	}
 	hashX := append(rn.Kern[:], utils.Uint64ToBytesInLittleEndian(rn.Nonce)...)
 	hashX = append(hashX, rn.Timestamp...)
@@ -378,7 +379,7 @@ func (ep *EncFlowProxy) recheckHash(rn *protocol.HandShakeMsg) error {
 	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash[:], rn.Hasher[:])
 	if !status {
 		ep.Client.CloseAll()
-		return errors.New("HashError:" + descript)
+		return errors.New(protocol.P_PREFIX + protocol.BILATERY_HASH_ACK_FAILURE + descript)
 	}
 	return nil
 }
@@ -386,7 +387,7 @@ func (ep *EncFlowProxy) recheckHash(rn *protocol.HandShakeMsg) error {
 func (ep *EncFlowProxy) writeResponse(proxy_client_handshake *protocol.HandShakeMsg) error {
 	if ep.rpk == nil {
 		ep.Client.CloseAll()
-		return errors.New(`rn validation failed`)
+		return errors.New(protocol.FAILED_TO_VALIDATE_RN)
 	}
 	tmpKey := protocol.GenerateSessionKey(
 		[32]byte(ep.StreamCipher.GetKey()),
@@ -410,17 +411,23 @@ func (ep *EncFlowProxy) writeResponse(proxy_client_handshake *protocol.HandShake
 
 func (ep *EncFlowProxy) readFinish() error {
 	_finish, cnt, err := ep.DecReadViaClient()
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
+	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
+		err != nil {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`proxy: unexpected cut or err:`, err)
+		return defErr.DescribeThenConcat(protocol.P_PREFIX+protocol.BILATERY_ACK_FINISHED_FAILURE, err)
 	}
 	if !protocol.AckFlowValidation(
-		ep.HashCipher, _finish, []byte(protocol.HANDHLT),
-		ep.ackTimCheck, &ep.ackRec, ep.pingRef, false) {
+		ep.HashCipher,
+		_finish,
+		[]byte(protocol.HANDHLT),
+		ep.ackTimCheck,
+		&ep.ackRec,
+		ep.pingRef,
+		false) {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
-		return errors.New(`client finished failed`)
+		return errors.New(protocol.P_PREFIX + protocol.BILATERY_ACK_FINISHED_FAILURE)
 	}
 	ep.rSignal <- true
 	return nil
@@ -429,16 +436,19 @@ func (ep *EncFlowProxy) readFinish() error {
 func (ep *EncFlowProxy) writeFinish() error {
 	curr, res := protocol.AckToTimestampHash(ep.HashCipher, []byte(protocol.HANDHLT))
 	cnt, err := ep.EncWrite2Client(append(curr, res...))
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+4 || err != nil {
+	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
+		err != nil {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(`failed to send final finish or err:`, err)
+		return defErr.DescribeThenConcat(
+			protocol.P_PREFIX+protocol.BILATERY_FINISHED_FAILURE,
+			err)
 	}
 	return nil
 }
 
 func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 	if !<-ep.rSignal {
-		werr = errors.New(`quit for invalid client-hello`)
+		werr = errors.New(protocol.P_PREFIX + protocol.BILATERY_INVALID_HELLO)
 		return
 	}
 	werr = ep.writeStep1()
@@ -489,7 +499,7 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 	}
 	// log.Println(`pflow2 has sent`)
 	if !<-ep.rSignal { // wait successful check and then send response
-		werr = errors.New(`invalid cpack`)
+		werr = errors.New(protocol.AN_INVALID_CFLOW)
 		return
 	}
 
@@ -498,7 +508,7 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 		return
 	}
 	if !<-ep.rSignal { // wait finish and then send finish
-		werr = errors.New(`invalid cpack`)
+		werr = errors.New(protocol.AN_INVALID_CFLOW)
 		return
 	}
 
@@ -548,14 +558,14 @@ func (ep *EncFlowProxy) shakeHandReadCoroutine() (rerr error) {
 	// log.Println(`ackpflow2 has recv`)
 	ep.rpk, rerr = ep.rnAndDecrypt(cflow1, cflow2)
 	if rerr != nil {
-		log.Println(`failed to dec, send false signal to ep-writer`)
+		// log.Println(`failed to dec, send false signal to ep-writer`)
 		ep.rSignal <- false
 		return
 	}
 	// log.Println(`rn has dec`)
 	rerr = ep.recheckHash(ep.rpk)
 	if rerr != nil {
-		log.Println(`failed to validate hash, send false signal to ep-writer`)
+		// log.Println(`failed to validate hash, send false signal to ep-writer`)
 		ep.rSignal <- false
 		return
 	}
@@ -581,13 +591,16 @@ func (ep *EncFlowProxy) Shakehand() (werr error, rerr error) {
 	ip, _ := ep.clientAddrSpliter()
 	ping_ref, ok := service.PingWithoutPrint(ip, 3, 5, 5)
 	if !ok {
-		log.Println(protocol.PROXY_PREFIX + protocol.FAILED_TO_PING_AND_MEASURE)
-		werr = errors.New(protocol.FAILED_TO_PING_AND_MEASURE)
-		rerr = errors.New(protocol.FAILED_TO_PING_AND_MEASURE)
+		// log.Println(protocol.PROXY_PREFIX + protocol.BILATERY_FAILED_TO_PING_AND_MEASURE)
+		werr = errors.New(protocol.BILATERY_FAILED_TO_PING)
+		rerr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		return
 	}
 	ep.pingRef = ping_ref
-	wch, rch, functor := make(chan error), make(chan error), func() { ep.ackTimCheck, ep.ackRec = new([8][]byte), 0 }
+	wch, rch := make(chan error), make(chan error)
+	functor := func() {
+		ep.ackTimCheck, ep.ackRec = new([8][]byte), 0
+	}
 	functor()
 	defer functor()
 	defer close(wch)

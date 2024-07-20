@@ -17,15 +17,16 @@ const letters string = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZ
 
 /*
 compare whether two byte slices are the same.
-return true, `ok` if true, otherwise return false and the reason.
+
+	return true, `ok` if true, otherwise return false and the reason.
 */
 func CompareByteSliceEqualOrNot(a []byte, b []byte) (bool, string) {
 	if len(a) != len(b) {
-		return false, `Len: uneq`
+		return false, `uneq: Len`
 	}
 	for idx, val := range a {
 		if val != b[idx] {
-			return false, `Val: uneq`
+			return false, `uneq: Val`
 		}
 	}
 	return true, `ok`

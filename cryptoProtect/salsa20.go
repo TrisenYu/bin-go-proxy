@@ -31,7 +31,7 @@ var sbox2 = [...]byte{
 	0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2,
 }
 
-func (s *Salsa20) DecryptFlow(msg []byte) []byte {
+func (s *Salsa20) DecryptFlow(msg []byte) ([]byte, error) {
 	oup := make([]byte, len(msg))
 	var extend_iv [GoogleCiphersNonceLen]byte
 	copy(extend_iv[:IVSize], s.shadowIv[:])
@@ -44,10 +44,10 @@ func (s *Salsa20) DecryptFlow(msg []byte) []byte {
 			s.shadowIv[i] + sbox2[s.shadowIv[(i-1+IVSize)%IVSize]]) & 0xFF
 		s.shadowIv[i] = tmp
 	}
-	return oup
+	return oup, nil
 }
 
-func (s *Salsa20) EncryptFlow(msg []byte) []byte {
+func (s *Salsa20) EncryptFlow(msg []byte) ([]byte, error) {
 	oup := make([]byte, len(msg))
 	var extend_iv [GoogleCiphersNonceLen]byte
 	copy(extend_iv[:IVSize], s.Iv[:])
@@ -62,7 +62,7 @@ func (s *Salsa20) EncryptFlow(msg []byte) []byte {
 			s.Iv[i] + sbox2[s.Iv[(i-1+IVSize)%IVSize]])
 		s.Iv[i] = tmp
 	}
-	return oup
+	return oup, nil
 }
 
 func (s *Salsa20) SetKey(key []byte) {

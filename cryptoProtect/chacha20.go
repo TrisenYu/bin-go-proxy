@@ -15,7 +15,7 @@ type Chacha20poly1305 struct {
 	stream   cipher.AEAD
 }
 
-func (c *Chacha20poly1305) EncryptFlow(msg []byte) []byte {
+func (c *Chacha20poly1305) EncryptFlow(msg []byte) ([]byte, error) {
 	var extend_iv [GoogleCiphersNonceLen]byte
 	copy(extend_iv[:IVSize], c.Iv[:])
 	for i := IVSize; i < GoogleCiphersNonceLen; i++ {
@@ -24,7 +24,7 @@ func (c *Chacha20poly1305) EncryptFlow(msg []byte) []byte {
 	if c.stream == nil {
 		cc, err := chacha20poly1305.NewX(c.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		c.stream = cc
 	}
@@ -34,10 +34,10 @@ func (c *Chacha20poly1305) EncryptFlow(msg []byte) []byte {
 		c.Iv[i] = byte(uint16((c.Iv[i] + (c.Iv[(i-1+IVSize)%IVSize] << 1))))
 	}
 
-	return res
+	return res, nil
 }
 
-func (c *Chacha20poly1305) DecryptFlow(msg []byte) []byte {
+func (c *Chacha20poly1305) DecryptFlow(msg []byte) ([]byte, error) {
 	var extend_iv [GoogleCiphersNonceLen]byte
 	copy(extend_iv[:IVSize], c.shadowIv[:])
 	for i := IVSize; i < GoogleCiphersNonceLen; i++ {
@@ -46,19 +46,19 @@ func (c *Chacha20poly1305) DecryptFlow(msg []byte) []byte {
 	if c.stream == nil {
 		cc, err := chacha20poly1305.NewX(c.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		c.stream = cc
 	}
 	res, err := c.stream.Open(nil, extend_iv[:], msg, c.shadowIv[:])
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	for i := 0; i < IVSize; i++ {
 		c.shadowIv[i] = byte(uint16((c.shadowIv[i] + (c.shadowIv[(i-1+IVSize)%IVSize] << 1))))
 	}
-	return res
+	return res, nil
 }
 
 func (c *Chacha20poly1305) SetKey(key []byte) {

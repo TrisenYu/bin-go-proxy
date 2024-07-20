@@ -30,7 +30,7 @@ type (
 )
 
 /* GCM */
-func (s *SM4_GCM) EncryptFlow(msg []byte) []byte {
+func (s *SM4_GCM) EncryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	compressIv := [12] /* stream.NonceSize() */ byte{}
 	for i := 0; i < IVSize; i++ {
@@ -40,11 +40,11 @@ func (s *SM4_GCM) EncryptFlow(msg []byte) []byte {
 	if s.stream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		stream, err := cipher.NewGCM(block)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.stream = stream
 	}
@@ -52,10 +52,10 @@ func (s *SM4_GCM) EncryptFlow(msg []byte) []byte {
 	for i := 0; i < IVSize; i++ {
 		s.Iv[i] = byte(uint16((s.Iv[i] + (s.Iv[(i-1+IVSize)%IVSize] << 1)))) & 0xFF
 	}
-	return xor_res
+	return xor_res, nil
 }
 
-func (s *SM4_GCM) DecryptFlow(msg []byte) []byte {
+func (s *SM4_GCM) DecryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	compressIv := [12] /* stream.NonceSize() */ byte{}
 
@@ -67,22 +67,22 @@ func (s *SM4_GCM) DecryptFlow(msg []byte) []byte {
 	if s.stream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		stream, err := cipher.NewGCM(block)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.stream = stream
 	}
 	xor_res, err := s.stream.Open(nil, compressIv[:], msg, s.shadowIv[:])
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	for i := 0; i < IVSize; i++ {
 		s.shadowIv[i] = byte(uint16((s.shadowIv[i] + (s.shadowIv[(i-1+IVSize)%IVSize] << 1)))) & 0xFF
 	}
-	return xor_res
+	return xor_res, nil
 }
 
 func (s *SM4_GCM) SetKey(key []byte) {
@@ -104,7 +104,7 @@ func (s *SM4_GCM) GetIv() []byte {
 }
 
 /* OFB */
-func (s *SM4_OFB) EncryptFlow(msg []byte) []byte {
+func (s *SM4_OFB) EncryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	for i := 0; i < IVSize; i++ {
 		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
@@ -112,16 +112,16 @@ func (s *SM4_OFB) EncryptFlow(msg []byte) []byte {
 	if s.encStream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.encStream = cipher.NewCTR(block, s.Iv[:])
 	}
 	xor_res := make([]byte, len(msg))
 	s.encStream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
-func (s *SM4_OFB) DecryptFlow(msg []byte) []byte {
+func (s *SM4_OFB) DecryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	for i := 0; i < IVSize; i++ {
 		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
@@ -129,13 +129,13 @@ func (s *SM4_OFB) DecryptFlow(msg []byte) []byte {
 	if s.decStream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.decStream = cipher.NewCTR(block, s.Iv[:])
 	}
 	xor_res := make([]byte, len(msg))
 	s.decStream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
 func (s *SM4_OFB) SetKey(key []byte) {
@@ -155,7 +155,7 @@ func (s *SM4_OFB) GetIv() []byte {
 }
 
 /* CTR */
-func (s *SM4_CTR) EncryptFlow(msg []byte) []byte {
+func (s *SM4_CTR) EncryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	for i := 0; i < IVSize; i++ {
 		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
@@ -163,16 +163,16 @@ func (s *SM4_CTR) EncryptFlow(msg []byte) []byte {
 	if s.encStream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.encStream = cipher.NewCTR(block, s.Iv[:])
 	}
 	xor_res := make([]byte, len(msg))
 	s.encStream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
-func (s *SM4_CTR) DecryptFlow(msg []byte) []byte {
+func (s *SM4_CTR) DecryptFlow(msg []byte) ([]byte, error) {
 	key := [IVSize]byte{}
 	for i := 0; i < IVSize; i++ {
 		key[i] = uint8((s.Key[i] + s.Key[KeySize-1-i]) & 0xFF)
@@ -180,13 +180,13 @@ func (s *SM4_CTR) DecryptFlow(msg []byte) []byte {
 	if s.decStream == nil {
 		block, err := sm4.NewCipher(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		s.decStream = cipher.NewCTR(block, s.Iv[:])
 	}
 	xor_res := make([]byte, len(msg))
 	s.decStream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
 func (s *SM4_CTR) SetKey(key []byte) {

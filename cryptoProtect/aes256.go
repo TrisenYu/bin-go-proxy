@@ -49,30 +49,30 @@ type (
 )
 
 // CTR
-func (a *AES_CTR) EncryptFlow(msg []byte) []byte {
+func (a *AES_CTR) EncryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 	if a.encstream == nil {
 		block, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		a.encstream = cipher.NewCTR(block, a.Iv[:])
 	}
 	a.encstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
-func (a *AES_CTR) DecryptFlow(msg []byte) []byte {
+func (a *AES_CTR) DecryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 	if a.decstream == nil {
 		block, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		a.decstream = cipher.NewCTR(block, a.Iv[:])
 	}
 	a.decstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
 func (a *AES_CTR) SetKey(key []byte) {
@@ -92,34 +92,34 @@ func (a *AES_CTR) GetIv() []byte {
 }
 
 // OFB
-func (a *AES_OFB) EncryptFlow(msg []byte) []byte {
+func (a *AES_OFB) EncryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 
 	if a.encstream == nil {
 		block, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		a.encstream = cipher.NewCTR(block, a.Iv[:])
 	}
 	a.encstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
-func (a *AES_OFB) DecryptFlow(msg []byte) []byte {
+func (a *AES_OFB) DecryptFlow(msg []byte) ([]byte, error) {
 	xor_res := make([]byte, len(msg))
 
 	if a.decstream == nil {
 		block, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		a.decstream = cipher.NewCTR(block, a.Iv[:])
 	}
 	a.decstream.XORKeyStream(xor_res, msg)
-	return xor_res
+	return xor_res, nil
 }
 
 func (a *AES_OFB) SetKey(key []byte) {
@@ -139,15 +139,15 @@ func (a *AES_OFB) GetIv() []byte {
 }
 
 // GCM
-func (a *AES_GCM) EncryptFlow(msg []byte) []byte {
+func (a *AES_GCM) EncryptFlow(msg []byte) ([]byte, error) {
 	if a.stream == nil {
 		cc, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		stream, err := cipher.NewGCM(cc)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		a.stream = stream
 	}
@@ -155,29 +155,29 @@ func (a *AES_GCM) EncryptFlow(msg []byte) []byte {
 	for i := 0; i < IVSize; i++ {
 		a.Iv[i] = byte(uint16((a.Iv[i] + (a.Iv[(i-1+IVSize)%IVSize] << 1))))
 	}
-	return res
+	return res, nil
 }
 
-func (a *AES_GCM) DecryptFlow(msg []byte) []byte {
+func (a *AES_GCM) DecryptFlow(msg []byte) ([]byte, error) {
 	if a.stream == nil {
 		cc, err := aes.NewCipher(a.Key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		stream, err := cipher.NewGCM(cc)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		a.stream = stream
 	}
 	res, err := a.stream.Open(nil, a.shadowIv[:], msg, a.shadowIv[:])
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	for i := 0; i < IVSize; i++ {
 		a.shadowIv[i] = byte(uint16((a.shadowIv[i] + (a.shadowIv[(i-1+IVSize)%IVSize] << 1))))
 	}
-	return res
+	return res, nil
 }
 
 func (a *AES_GCM) SetKey(key []byte) {

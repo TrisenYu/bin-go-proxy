@@ -102,7 +102,7 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 			return defErr.DescribeThenConcat(`fatal error:`, err)
 		}
 		ep.remote_info = &res
-		return errors.New(`need jump out`)
+		return errors.New(`info: need jump out`)
 
 	case protocol.CMD_client_ready4_dual:
 		if ep.remote_info == nil {
