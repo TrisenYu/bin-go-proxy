@@ -8,15 +8,13 @@ import (
 	"errors"
 	"math/big"
 
-	utils "bingoproxy/utils"
-
 	"github.com/emmansun/gmsm/sm2"
 )
 
 func publicKeyToBytes(publicKey *ecdsa.PublicKey) []byte {
 	xBytes := publicKey.X.Bytes()
 	yBytes := publicKey.Y.Bytes()
-	byteLen := utils.MaxInt(len(xBytes), len(yBytes))
+	byteLen := max(len(xBytes), len(yBytes))
 
 	xBytes = append(make([]byte, byteLen-len(xBytes)), xBytes...)
 	yBytes = append(make([]byte, byteLen-len(yBytes)), yBytes...)
@@ -102,7 +100,7 @@ func (_sm2 *SM2) PubVerify(msg []byte, signature []byte) bool {
 	}
 	r.SetBytes(signature[:SignSize/2])
 	s.SetBytes(signature[SignSize/2:])
-	return sm2.VerifyWithSM2(_sm2.pub, []byte(``), msg, r, s)
+	return sm2.VerifyWithSM2(_sm2.pub, []byte{}, msg, r, s)
 }
 
 func (_sm2 *SM2) GetPubLen() uint64 {

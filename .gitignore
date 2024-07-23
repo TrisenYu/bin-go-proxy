@@ -1,8 +1,9 @@
-Interceptor/ref/
-Interceptor/wintun/include/
-Interceptor/winIpConfig/
+interceptor/ref/
+interceptor/wintun/include/
+interceptor/winIpConfig/
 service/ref-kcp
 service/note.md
 experimental/
 *.txt
 .vscode/
+.dist/

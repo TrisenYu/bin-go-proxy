@@ -23,7 +23,7 @@ const (
 	KeySize  int                      = 32
 	HashSize int                      = KeySize
 	SignSize int                      = 64
-	PICK_SM2 asymmetric_cipher_choice = iota + 1
+	PICK_SM2 asymmetric_cipher_choice = iota - 3
 	// TODO: Lattice encryption.
 )
 

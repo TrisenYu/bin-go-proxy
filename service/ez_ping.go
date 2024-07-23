@@ -101,8 +101,8 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 			`len:`, n, `byte(s)`,
 			`Time:`, t, `ms`,
 			`TTL:`, buf[8])
-		minnTime = utils.MinInt(minnTime, uint(t))
-		maxnTime = utils.MaxInt(t, maxnTime)
+		minnTime = min(minnTime, uint(t))
+		maxnTime = max(t, maxnTime)
 		time.Sleep(time.Second)
 	}
 	maxn_choice = cmpAndSetString(lstMaxn, maxnTime)
@@ -114,7 +114,7 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 	if sok == 0 {
 		return -1, false
 	}
-	return utils.MaxInt(lstMaxn, maxnTime), true
+	return max(lstMaxn, maxnTime), true
 }
 
 // return: average RTT(unit us) and the reachability result(true for accessable)

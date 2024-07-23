@@ -72,7 +72,7 @@ the way of mapping:
 	  |c   |p   |c   |p   |c   |p   |c   |p   |
 	  +----+----+----+----+----+----+----+----+
 
-	2 and then xor pressionkey with sbox => hash as key
+	2 and then operate pressionkey with sbox => hash as key
 */
 func GenerateSessionKey(
 	prekey [cryptoprotect.KeySize]byte,
@@ -83,8 +83,8 @@ func GenerateSessionKey(
 	key := make([]byte, cryptoprotect.KeySize)
 	keySize := cryptoprotect.KeySize
 	for i := 0; i < keySize; i += 4 {
-		shift, flag := i/4, i/8
-		if flag&1 == 1 {
+		shift, flag := i>>2, (i>>3) == 1
+		if flag {
 			key[i] = prekey[i] ^ byte(pnonce>>uint64(shift<<3))
 		} else {
 			key[i] = prekey[i] ^ byte(cnonce>>uint64(shift<<3))

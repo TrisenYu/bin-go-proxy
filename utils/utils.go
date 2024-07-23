@@ -72,6 +72,8 @@ func GenerateEnterableRandomString(lena int64) string {
 	return string(res)
 }
 
+// warning: `DO NOT EDIT THESE FUNCTIONS' NAMES.`
+
 func Uint64ToBytesInLittleEndian(inp uint64) []byte {
 	var res []byte
 	for i := 0; i < 8; i++ {
@@ -115,6 +117,8 @@ func BytesToUint64(inp [8]byte) (res uint64) {
 	return
 }
 
+// END OF warning: `DO NOT EDIT THESE FUNCTIONS' NAMES.`
+
 /*
 Interlocking
 
@@ -130,24 +134,8 @@ func BytesSpliterInHalfChanceField(a []byte) ([]byte, []byte) {
 	return a[:portion*lena/100], a[portion*lena/100:]
 }
 
-func MaxInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16](a T, b T) T {
-	flag := a > b
-	if flag {
-		return a
-	}
-	return b
-}
-
-func MinInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16](a T, b T) T {
-	flag := a < b
-	if flag {
-		return a
-	}
-	return b
-}
-
 func AbsMinusInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16](a T, b T) T {
-	return MaxInt(a, b) - MinInt(a, b)
+	return max(a, b) - min(a, b)
 }
 
 // get absolute path of current `utils.go`
@@ -161,7 +149,7 @@ func GetFilePath(inp string) (string, error) {
 }
 
 // Debug function used for dumping hex representation of a byte slice.
-// Timestamp attached.
+// Timestamp attached ahead.
 func BytesHexForm(inp []byte) {
 	if len(inp) == 0 {
 		log.Println(0)

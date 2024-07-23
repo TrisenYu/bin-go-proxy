@@ -6,7 +6,7 @@ package interceptor
 import (
 	"testing"
 
-	service "selfproxy/service"
+	service "bingoproxy/service"
 )
 
 func TestTunDev(t *testing.T) {

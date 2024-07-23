@@ -6,13 +6,13 @@
 /*
 CREDITS:
 
-	WireGuard github dot com/WireGuard/wintun
-	git dot zx2c4 dot com/wintun-go/tree/wintun dot go
-	skyblond dot info/archives/989 dot html`
-	www dot kandaoni dot com/news/31395 dot html
-	www dot hackerfactor dot com
+	WireGuard: github.com/WireGuard/wintun
+	git.zx2c4.com/wintun-go/tree/wintun.go
+	skyblond.info/archives/989.html`
+	www.kandaoni.com/news/31395.html
+	www.hackerfactor.com
+	tailscale.com/blog/how-tailscale-works
 */
-
 package interceptor
 
 import (

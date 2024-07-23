@@ -10,26 +10,14 @@ import (
 )
 
 type (
-	Queue interface {
-		PushBack() interface{} // pop item from queueHead.
-		PopFront(interface{})  // push item to queue
-		Len() int64            // length of current queue.
+	TDPItem interface {
+		ReverseIDMessage | AddrMessage | struct{} | interface{}
 	}
-
-	ReverseIDMessageQueue struct {
-		q      list.List
-		empty  *sync.Cond
-		length int32
-	}
-	AddrMessageQueue struct {
-		q      list.List
-		length int32
-		empty  *sync.Cond
-	}
-	EventNotifyQueue struct {
-		q      list.List
-		length int32
-		empty  *sync.Cond
+	TDPQueue struct {
+		q                list.List
+		empty, full      *sync.Cond
+		mutex            sync.Mutex
+		length, boundary int32
 	}
 	ReverseIDMessage struct {
 		Idx uint32
@@ -41,86 +29,20 @@ type (
 	}
 )
 
-// I am not sure if this work.
-func (m *ReverseIDMessageQueue) Init() {
-	m.empty = &sync.Cond{}
-}
+const default_size int32 = 256
 
-func (a *AddrMessageQueue) Init() {
-	a.empty = &sync.Cond{}
-}
-
-// push message into queue.
-func (m *ReverseIDMessageQueue) PushBack(msg ReverseIDMessage) {
-	m.empty.L.Lock()
-	defer m.empty.L.Unlock()
-	m.q.PushBack(msg)
-	atomic.AddInt32(&m.length, 1)
-	m.empty.Broadcast()
-}
-
-// return nil if queue is empty.
-func (m *ReverseIDMessageQueue) PopFront() ReverseIDMessage {
-	m.empty.L.Lock()
-	defer m.empty.L.Unlock()
-	for m.Len() == 0 {
-		m.empty.Wait()
+func (q *TDPQueue) Init(max_queue_size int32) {
+	q.empty = sync.NewCond(&sync.Mutex{})
+	q.full = sync.NewCond(&sync.Mutex{})
+	if max_queue_size <= 0 {
+		q.boundary = default_size
+	} else {
+		q.boundary = max_queue_size
 	}
-
-	_res := m.q.Front()
-	if _res == nil {
-		return ReverseIDMessage{}
-	}
-	res := _res.Value.(ReverseIDMessage)
-	m.q.Remove(_res)
-	atomic.AddInt32(&m.length, -1)
-	return res
 }
 
-// return the length of queue.
-func (m *ReverseIDMessageQueue) Len() int32 {
-	res := atomic.LoadInt32(&m.length)
-	return res
-}
-
-// push AddrMessage into queue. there is no limitation on pushing one item to the queue.
-func (a *AddrMessageQueue) PushBack(msg AddrMessage) {
-	a.empty.L.Lock()
-	a.q.PushBack(msg)
-	atomic.AddInt32(&a.length, 1)
-	a.empty.L.Unlock()
-	a.empty.Broadcast()
-}
-
-// block if no item in queue. when being notified, this function will fetch one item from queue.
-// if nothing is inside the queue, return nil.
-// otherwise remove and reture the item.
-func (a *AddrMessageQueue) PopFront() AddrMessage {
-	a.empty.L.Lock()
-	defer a.empty.L.Unlock()
-	for a.Len() == 0 {
-		a.empty.Wait()
-	}
-
-	_res := a.q.Front()
-	if _res == nil {
-		return AddrMessage{}
-	}
-	res := _res.Value.(AddrMessage)
-	a.q.Remove(_res)
-	atomic.AddInt32(&a.length, -1)
-	return res
-}
-
-// return the length of queue.
-func (a *AddrMessageQueue) Len() int32 {
-	res := atomic.LoadInt32(&a.length)
-	return res
-}
-
-// push message into queue.
-func (e *EventNotifyQueue) PushBack(msg interface{}) {
-	// if the msg is struct{}, then there is no need for enqueueing.
+// push one item into queue.
+func (q *TDPQueue) PushBack(msg TDPItem) {
 	switch msg.(type) {
 	case struct{}:
 		return
@@ -128,33 +50,45 @@ func (e *EventNotifyQueue) PushBack(msg interface{}) {
 		return
 	default:
 	}
-	e.empty.L.Lock()
-	defer e.empty.L.Unlock()
-	e.q.PushBack(msg)
-	atomic.AddInt32(&e.length, 1)
-	e.empty.Broadcast()
+	q.full.L.Lock()
+	for q.Len() == q.boundary {
+		q.full.Wait() /// Wait for state of not full
+	}
+	q.full.L.Unlock()
+
+	q.mutex.Lock()
+	q.q.PushBack(msg)
+	q.length += 1
+	q.mutex.Unlock()
+
+	q.empty.Signal() /// not empty any more.
 }
 
-// return nil if queue is empty.
-func (e EventNotifyQueue) PopFront() interface{} {
-	e.empty.L.Lock()
-	defer e.empty.L.Unlock()
-	for e.Len() == 0 {
-		e.empty.Wait()
+// return nil if queue is empty. pop one item from the head of queue.
+func (q *TDPQueue) PopFront() TDPItem {
+	q.empty.L.Lock()
+	for q.Len() == 0 {
+		q.empty.Wait()
 	}
+	q.empty.L.Unlock()
 
-	_res := e.q.Front()
+	q.mutex.Lock()
+	_res := q.q.Front()
 	if _res == nil {
+		q.mutex.Unlock()
 		return nil
 	}
 	res := _res.Value
-	e.q.Remove(_res)
-	atomic.AddInt32(&e.length, -1)
+	q.q.Remove(_res)
+	q.length -= 1
+	q.mutex.Unlock()
+
+	q.full.Signal()
 	return res
 }
 
-// return the length of queue.
-func (e EventNotifyQueue) Len() int32 {
-	res := atomic.LoadInt32(&e.length)
+// return the length of current queue.
+func (q *TDPQueue) Len() int32 {
+	res := atomic.LoadInt32(&q.length)
 	return res
 }
