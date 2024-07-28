@@ -83,7 +83,7 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 		}
 		var res ClientControlMsg
 		res.Rport = [2]byte(payload[protocol.CMD_PAYLOAD_LEN:protocol.CMD_RPORT_ED])
-		addrlen_int := utils.BytesToUint16([2]byte(payload[protocol.CMD_RPORT_ED:protocol.CMD_ADDR_ED]))
+		addrlen_int := utils.LittleEndianBytesToUint16([2]byte(payload[protocol.CMD_RPORT_ED:protocol.CMD_ADDR_ED]))
 		recheck_len := protocol.CMD_ADDR_ED + uint(addrlen_int)
 		res.Remote = payload[protocol.CMD_ADDR_ED:]
 		if uint(len(res.Remote)) != recheck_len {
@@ -166,7 +166,7 @@ func (ep *EncFlowProxy) CmdParser() error {
 		return defErr.DescribeThenConcat(`unexpected error: failed to dec-read from client or fake packet caused by`, err)
 	}
 	attr, ver := packet[0], packet[1]
-	nxt_len := utils.BytesToUint32([4]byte(packet[2:6]))
+	nxt_len := utils.LittleEndianBytesToUint32([4]byte(packet[2:6]))
 
 	if ver != protocol.PROTOCOL_VERSION {
 		return errors.New(`fatal error: fraud version`)
@@ -207,7 +207,7 @@ func (ep *EncFlowProxy) Stage2Emulator() {
 	defer ep.Client.CloseAll()
 recontrol:
 	if err := ep.CmdParser(); err != nil {
-		log.Println(`[proxy_forwarding.go-211]`, err.Error())
+		log.Println(err.Error())
 		switch err.Error()[0] {
 		case 'f':
 			fallthrough

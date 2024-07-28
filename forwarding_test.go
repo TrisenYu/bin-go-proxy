@@ -15,7 +15,7 @@ import (
 )
 
 func TestForwarding(t *testing.T) {
-	log.Println(`[forwarding_test.go-13] Begin forwarding test`)
+	log.Println(`Begin forwarding test`)
 	var (
 		ep proxy.EncFlowProxy
 		c  client.Client
@@ -29,10 +29,6 @@ func TestForwarding(t *testing.T) {
 	ch_listen, ch_conn := make(chan net.Listener, 1), make(chan net.Conn, 1)
 	ch_client := make(chan net.Conn, 1)
 	ch_err := make(chan [2]error)
-	defer close(ch_err)
-	defer close(ch_client)
-	defer close(ch_listen)
-	defer close(ch_conn)
 
 	go func() {
 		dial, err := net.Dial("tcp6", "[::1]:9971")
@@ -40,6 +36,7 @@ func TestForwarding(t *testing.T) {
 			t.Errorf(err.Error())
 		}
 		ch_client <- dial
+		close(ch_client)
 	}()
 
 	go func() {
@@ -55,6 +52,8 @@ func TestForwarding(t *testing.T) {
 		conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 		ch_listen <- listener
 		ch_conn <- conn
+		close(ch_listen)
+		close(ch_conn)
 	}()
 
 	c.MiProxy.Conn = <-ch_client
@@ -67,6 +66,7 @@ func TestForwarding(t *testing.T) {
 	go func() {
 		werr, rerr := ep.Shakehand()
 		ch_err <- [2]error{werr, rerr}
+		close(ch_err)
 	}()
 	time.Sleep(time.Millisecond)
 	cwerr, crerr := c.Shakehand()
@@ -90,7 +90,7 @@ func TestForwarding(t *testing.T) {
 		return
 	}
 
-	log.Println(`[forwarding_test.go-28] End of shakehand.`)
+	log.Println(`End of shakehand.`)
 
 	go func() {
 		key, iv, err := cryptoprotect.GeneratePresessionKey()

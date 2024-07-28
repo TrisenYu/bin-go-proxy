@@ -50,7 +50,7 @@ func cmpAndSetString[T uint | int64](backup T, curr T) string {
 func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 	conn, err := net.DialTimeout(`ip:icmp`, dst_ip, time.Duration(10)*time.Second)
 	if err != nil {
-		log.Println(`[ping.go-46]`, err)
+		log.Println(err)
 		return -1, false
 	}
 	defer conn.Close()
@@ -83,7 +83,7 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 
 		_, err := conn.Write(payload)
 		if err != nil {
-			log.Println(`[ping.go-76]`, err)
+			log.Println(err)
 			continue
 		}
 		sok += 1
@@ -91,7 +91,7 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 		buf := make([]byte, 1024)
 		n, err := conn.Read(buf)
 		if err != nil {
-			log.Println(`[ping.go-84]`, err)
+			log.Println(err)
 			continue
 		}
 		rok += 1
@@ -117,19 +117,26 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 	return max(lstMaxn, maxnTime), true
 }
 
-// return: average RTT(unit us) and the reachability result(true for accessable)
+// return: average RTT(us) and the reachability(true for accessable)
 func PingWithoutPrint(
 	dst_ip string,
 	cnt uint16,
 	conn_timeout_sec, pong_timeout_sec uint,
 ) (int64, bool) {
 	switch dst_ip {
-	// TODO: bad implementation!
+	// TODO: it seems like a bad implementation!
 	case `[::1]`:
+		fallthrough
+	case `localhost`:
 		fallthrough
 	case `127.0.0.1`:
 		return 15500, true
 	default:
+		// 127.0.0.1/8
+		// 192.168.0.0/16
+		// 172.16.0.0/14
+		// 10.0.0.0/8
+		// 224.*.*.*+
 	}
 	conn, err := net.DialTimeout(`ip:icmp`, dst_ip, time.Duration(conn_timeout_sec)*time.Second)
 	if err != nil {

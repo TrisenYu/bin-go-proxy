@@ -24,7 +24,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 	ep.InitChannel()
 	defer c.DeleteChannel()
 	defer ep.DeleteChannel()
-	log.Println(`[handshake_test.go-64] we will begin client-proxy shakehand test.`)
+	log.Println(`we will begin client-proxy shakehand test.`)
 
 	cp_con, pc_con := make(chan net.Conn, 1), make(chan net.Conn, 1)
 	_listener := make(chan net.Listener)
@@ -39,6 +39,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 		}
 		dialer.SetReadDeadline(time.Now().Add(time.Second * 5))
 		cp_con <- dialer
+		close(cp_con)
 	}()
 
 	go func() {
@@ -57,6 +58,8 @@ func TestHandShakeInTCP6(t *testing.T) {
 		conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 		pc_con <- conn
 		_listener <- listener
+		close(pc_con)
+		close(_listener)
 	}()
 
 	c.MiProxy.Conn, ep.Client.Conn = <-cp_con, <-pc_con
@@ -65,15 +68,12 @@ func TestHandShakeInTCP6(t *testing.T) {
 	defer c.MiProxy.Conn.Close()
 	defer ep.Client.Conn.Close()
 	defer global_listener.Close()
-	defer close(cp_con)
-	defer close(pc_con)
-	defer close(_listener)
 
 	server_done, client_done := make(chan bool), make(chan bool)
-	defer close(server_done)
-	defer close(client_done)
+
 	go func() {
 		pwerr, prerr := ep.Shakehand()
+		defer close(server_done)
 		if pwerr != nil {
 			server_done <- false
 			t.Errorf(pwerr.Error())
@@ -88,6 +88,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 	}()
 	go func() {
 		cwerr, crerr := c.Shakehand()
+		defer close(client_done)
 		if cwerr != nil {
 			client_done <- false
 			t.Errorf(cwerr.Error())
@@ -108,5 +109,5 @@ func TestHandShakeInTCP6(t *testing.T) {
 		t.Error(`Unaccepted`)
 		return
 	}
-	log.Println(`[handshake_test.go] End of HandShake Test`)
+	log.Println(`End of HandShake Test`)
 }

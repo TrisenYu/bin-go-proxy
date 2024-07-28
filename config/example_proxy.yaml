@@ -1,0 +1,6 @@
+# SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
+# (C) 2024 Author: <kisfg@hotmail.com>
+# DEFINE AS A SAMPLE.
+ProxyConfig:
+  PathToAccessToken: "./.accessToken" # highly recommand set to absolute path instead of relative path.
+  ListeningPort: 9971

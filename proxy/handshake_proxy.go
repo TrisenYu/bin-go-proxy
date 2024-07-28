@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"bingoproxy/auth"
 	cryptoprotect "bingoproxy/cryptoProtect"
 	zipper "bingoproxy/cryptoProtect/zipper"
 	defErr "bingoproxy/defErr"
@@ -28,7 +29,7 @@ invoke this after initialize `client_asymmetric_pub`.
 func (ep *EncFlowProxy) cPubEncrypt(handshake *protocol.HandShakeMsg) ([]byte, error) {
 	serialization := make([]byte, 0)
 	serialization = append(serialization, handshake.Kern[:]...)
-	serialization = append(serialization, utils.Uint64ToBytesInLittleEndian(handshake.Nonce)...)
+	serialization = append(serialization, utils.Uint64ToLittleEndianBytes(handshake.Nonce)...)
 	serialization = append(serialization, handshake.Hasher[:]...)
 	serialization = append(serialization, handshake.Signature[:]...)
 	serialization = append(serialization, handshake.Timestamp...)
@@ -62,7 +63,7 @@ func (ep *EncFlowProxy) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg,
 
 	var handshakemsg protocol.HandShakeMsg = protocol.HandShakeMsg{
 		Kern:      ker,
-		Nonce:     utils.BytesToUint64([8]byte(msg[iv_ed:nonce_ed])),
+		Nonce:     utils.LittleEndianBytesToUint64([8]byte(msg[iv_ed:nonce_ed])),
 		Hasher:    hasher,
 		Signature: signer,
 		Timestamp: msg[sign_ed:],
@@ -71,19 +72,19 @@ func (ep *EncFlowProxy) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg,
 }
 
 func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from config*/ ) error {
-	client_hello, _, _ := ep.Client.Read()
-	/*
-		if cnt != 4+auth.TokenLen || err != nil {
-			return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
-		}
-		token := client_hello[4:]
-		state, descript := auth.AuthValidation(token)
-		if !state {
-			return errors.New(descript)
-		}
-	*/
+	client_hello, cnt, err := ep.Client.Read()
+
+	if cnt != 4+auth.TokenLen || err != nil {
+		return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
+	}
+	token := client_hello[4:]
+	state, descript := auth.AuthValidation(token)
+	if !state {
+		return errors.New(descript)
+	}
+
 	_crypto_suite := [4]byte(client_hello[:4])
-	crypto_suite := utils.BytesToUint32(_crypto_suite)
+	crypto_suite := utils.LittleEndianBytesToUint32(_crypto_suite)
 	var functor func(uint32, int) byte = func(u uint32, i int) byte { return byte((u >> i) & 0xFF) }
 
 	switch functor(crypto_suite, 0) {
@@ -373,7 +374,7 @@ func (ep *EncFlowProxy) recheckHash(rn *protocol.HandShakeMsg) error {
 		ep.Client.CloseAll()
 		return errors.New(protocol.BILATERY_SIGNATURE_FAILURE)
 	}
-	hashX := append(rn.Kern[:], utils.Uint64ToBytesInLittleEndian(rn.Nonce)...)
+	hashX := append(rn.Kern[:], utils.Uint64ToLittleEndianBytes(rn.Nonce)...)
 	hashX = append(hashX, rn.Timestamp...)
 	recheck_hash := [32]byte(ep.HashCipher.CalculateHash(hashX))
 	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash[:], rn.Hasher[:])
@@ -455,18 +456,16 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 	if werr != nil {
 		return
 	}
-	// log.Println(`PPUB has sent`)
 	werr = ep.writeStep2()
 	if werr != nil {
 		return
 	}
-	// log.Println(`ackcpub has sent`)
 	proxy_client_handshake, werr := ep.GeneratePresessionKey()
 	if werr != nil {
 		return
 	}
 
-	// TODO: can here resist DDos?
+	// TODO: can encryption here resist DDos?
 	enc_flow, err := ep.cPubEncrypt(proxy_client_handshake)
 	if err != nil {
 		werr = err
@@ -474,30 +473,25 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 	}
 	flow1, flow2 := utils.BytesSpliterInHalfChanceField(enc_flow)
 
-	// TODO: can here resist DDos?
 	werr = ep.writeStep3(1) // ack cflow1
 	if werr != nil {
 		return
 	}
-	// log.Println(`ackcflow1 has sent`)
 	werr = ep.writeStep4(flow1, 1) // send pflow1
 	if werr != nil {
 		return
 	}
 
-	// log.Println(`pflow1 has sent`)
 	// TODO: can here resist DDos?
 	werr = ep.writeStep3(2) // ack cflow2
 	if werr != nil {
 		return
 	}
 
-	// log.Println(`ackcflow2 has sent`)
 	werr = ep.writeStep4(flow2, 2) // send pflow2
 	if werr != nil {
 		return
 	}
-	// log.Println(`pflow2 has sent`)
 	if !<-ep.rSignal { // wait successful check and then send response
 		werr = errors.New(protocol.AN_INVALID_CFLOW)
 		return
@@ -530,46 +524,36 @@ func (ep *EncFlowProxy) shakeHandReadCoroutine() (rerr error) {
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackppub has recv`)
 	rerr = ep.readStep2()
 	if rerr != nil {
 		return
 	}
-	// log.Println(`cpub has recv`)
 	cflow1, rerr := ep.readStep3()
 	if rerr != nil {
 		return
 	}
-	// log.Println(`cflow1 has recv`)
 	rerr = ep.readStep4( /* ackpflow1 */ )
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackpflow1 has recv`)
 	cflow2, rerr := ep.readStep3()
 	if rerr != nil {
 		return
 	}
-	// log.Println(`cflow2 has recv`)
 	rerr = ep.readStep4( /* ackpflow2 */ )
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackpflow2 has recv`)
 	ep.rpk, rerr = ep.rnAndDecrypt(cflow1, cflow2)
 	if rerr != nil {
-		// log.Println(`failed to dec, send false signal to ep-writer`)
 		ep.rSignal <- false
 		return
 	}
-	// log.Println(`rn has dec`)
 	rerr = ep.recheckHash(ep.rpk)
 	if rerr != nil {
-		// log.Println(`failed to validate hash, send false signal to ep-writer`)
 		ep.rSignal <- false
 		return
 	}
-	// log.Println(`hash has passed`)
 	ep.rSignal <- true
 	rerr = ep.readFinish()
 	return
@@ -591,7 +575,6 @@ func (ep *EncFlowProxy) Shakehand() (werr error, rerr error) {
 	ip, _ := ep.clientAddrSpliter()
 	ping_ref, ok := service.PingWithoutPrint(ip, 3, 5, 5)
 	if !ok {
-		// log.Println(protocol.PROXY_PREFIX + protocol.BILATERY_FAILED_TO_PING_AND_MEASURE)
 		werr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		rerr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		return

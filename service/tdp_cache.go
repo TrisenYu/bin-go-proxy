@@ -1,3 +1,3 @@
 package service
 
-// remain to design.
+// remain to be designed.

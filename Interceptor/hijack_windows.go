@@ -115,9 +115,9 @@ func (guid *_GUID) GUIDSetfromBytes(inp []byte) error {
 	if len(inp) != 16 {
 		return errors.New(`invalid inp for GUID detected from bad len`)
 	}
-	guid.Data1 = utils.BytesToUint32([4]byte(inp[:4]))
-	guid.Data2 = utils.BytesToUint16([2]byte(inp[4:6]))
-	guid.Data3 = utils.BytesToUint16([2]byte(inp[6:8]))
+	guid.Data1 = utils.LittleEndianBytesToUint32([4]byte(inp[:4]))
+	guid.Data2 = utils.LittleEndianBytesToUint16([2]byte(inp[4:6]))
+	guid.Data3 = utils.LittleEndianBytesToUint16([2]byte(inp[6:8]))
 	guid.Data4 = [8]byte(inp[8:16])
 	return nil
 }
@@ -139,19 +139,19 @@ func (guid *_GUID) GUIDSetfromString(inp string) error {
 	if err != nil {
 		return err
 	}
-	guid.Data1 = utils.BytesToUint32([4]byte(_tmp))
+	guid.Data1 = utils.LittleEndianBytesToUint32([4]byte(_tmp))
 
 	_tmp, err = hex.DecodeString(inp[data1_st:data2_st])
 	if err != nil {
 		return err
 	}
-	guid.Data2 = utils.BytesToUint16([2]byte(_tmp))
+	guid.Data2 = utils.LittleEndianBytesToUint16([2]byte(_tmp))
 
 	_tmp, err = hex.DecodeString(inp[data2_st:data3_st])
 	if err != nil {
 		return err
 	}
-	guid.Data3 = utils.BytesToUint16([2]byte(_tmp))
+	guid.Data3 = utils.LittleEndianBytesToUint16([2]byte(_tmp))
 
 	_tmp, err = hex.DecodeString(inp[data3_st:])
 	if err != nil {
@@ -162,17 +162,17 @@ func (guid *_GUID) GUIDSetfromString(inp string) error {
 }
 
 func (guid *_GUID) GUIDtoString() string {
-	data1 := hex.EncodeToString(utils.Uint32ToBytesInLittleEndian(guid.Data1))
-	data2 := hex.EncodeToString(utils.Uint16ToBytesInLittleEndian(guid.Data2))
-	data3 := hex.EncodeToString(utils.Uint16ToBytesInLittleEndian(guid.Data3))
+	data1 := hex.EncodeToString(utils.Uint32ToLittleEndianBytes(guid.Data1))
+	data2 := hex.EncodeToString(utils.Uint16ToLittleEndianBytes(guid.Data2))
+	data3 := hex.EncodeToString(utils.Uint16ToLittleEndianBytes(guid.Data3))
 	data4 := hex.EncodeToString(guid.Data4[:])
 	return data1 + "-" + data2 + "-" + data3 + "-" + data4
 }
 
 func (guid *_GUID) GUIDtoBytes() [8 + 1 + 4 + 1 + 4 + 1 + 16]byte {
-	data1 := utils.Uint32ToBytesInLittleEndian(guid.Data1)
-	data2 := utils.Uint16ToBytesInLittleEndian(guid.Data2)
-	data3 := utils.Uint16ToBytesInLittleEndian(guid.Data3)
+	data1 := utils.Uint32ToLittleEndianBytes(guid.Data1)
+	data2 := utils.Uint16ToLittleEndianBytes(guid.Data2)
+	data3 := utils.Uint16ToLittleEndianBytes(guid.Data3)
 	data4 := guid.Data4[:]
 	data1 = append(data1, data2...)
 	data1 = append(data1, data3...)

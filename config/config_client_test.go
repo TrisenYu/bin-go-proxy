@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseClient(t *testing.T) {
-	now := ParseClientYAML(".\\test_client.yaml")
+	now := ParseClientYAML("./test_client.yaml")
 	if now == nil {
 		t.Error(`unable to parse`)
 		return

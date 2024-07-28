@@ -19,7 +19,7 @@ func (s *Socket) Read() ([]byte, uint, error) {
 	cnt, err := s.Conn.Read(res)
 	choice := min(cnt, 2048)
 	if choice != cnt {
-		err = errors.New(`incoming flow exccedd the maximum capicity(2048) of recv-buf, need continous recv`)
+		err = errors.New(`incoming flow exceeds the maximum capicity(2048) of recv-buf, need continous recv`)
 	}
 	return res[:choice], uint(choice), err
 }

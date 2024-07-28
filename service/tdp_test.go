@@ -45,11 +45,12 @@ func TestUDP(t *testing.T) {
 func TestQueue(t *testing.T) {
 	var helo *TDPQueue
 	var wg sync.WaitGroup
+	var ptr_ch *chan struct{}
 	wg.Add(3)
 	helo = &TDPQueue{}
 	helo.Init(16)
-	log.Println(utils.BytesToUint32([4]byte([]byte("tout"))),
-		utils.BytesToUint32([4]byte([]byte(`pout`))),
+	log.Println(utils.LittleEndianBytesToUint32([4]byte([]byte("tout"))),
+		utils.LittleEndianBytesToUint32([4]byte([]byte(`pout`))),
 	)
 
 	encapsulator := func(iM int) {
@@ -75,16 +76,19 @@ func TestQueue(t *testing.T) {
 	log.Println(`we send (1, nil) to reader...`)
 	time.Sleep(3 * time.Second)
 	helo.PushBack(AddrMessage{Msg: []byte(`hello world`)})
+	helo.PushBack(AddrMessage{Msg: []byte(`hello world2`)})
 
 	done_ch := make(chan struct{})
 	defer close(done_ch)
+	ptr_ch = &done_ch
 	go func() {
 		wg.Wait()
-		done_ch <- struct{}{}
+		*ptr_ch <- struct{}{}
 	}()
 	select {
-	case <-done_ch:
+	case <-*ptr_ch:
 		log.Println(`all routine working with queue went well.`)
+		return
 	case <-time.After(10 * time.Second):
 		log.Println(`timeout...`)
 	}

@@ -1,5 +1,0 @@
-# SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
-# (C) 2024 Author: <kisfg@hotmail.com>
-ProxyConfig:
-  PathToAccessToken: "./.accessToken.txt"
-  ListeningPort: 9971

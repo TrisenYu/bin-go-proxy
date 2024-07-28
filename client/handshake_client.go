@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	config "bingoproxy/config"
 	cryptoprotect "bingoproxy/cryptoProtect"
 	zipper "bingoproxy/cryptoProtect/zipper"
 	defErr "bingoproxy/defErr"
@@ -23,7 +24,7 @@ invoke this after gaining the proxy pubkey.
 func (c *Client) pPubEncryptHandShakeMsg(handshake *protocol.HandShakeMsg) ([]byte, error) {
 	serialization := make([]byte, 0)
 	serialization = append(serialization, handshake.Kern[:]...)
-	serialization = append(serialization, utils.Uint64ToBytesInLittleEndian(handshake.Nonce)...)
+	serialization = append(serialization, utils.Uint64ToLittleEndianBytes(handshake.Nonce)...)
 	serialization = append(serialization, handshake.Hasher[:]...)
 	serialization = append(serialization, handshake.Signature[:]...)
 	serialization = append(serialization, handshake.Timestamp...)
@@ -98,7 +99,7 @@ func (c *Client) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg, error)
 
 	var handshakemsg protocol.HandShakeMsg = protocol.HandShakeMsg{
 		Kern:      ker,
-		Nonce:     utils.BytesToUint64([8]byte(msg[iv_ed:nonce_ed])),
+		Nonce:     utils.LittleEndianBytesToUint64([8]byte(msg[iv_ed:nonce_ed])),
 		Hasher:    hasher,
 		Signature: signer,
 		Timestamp: msg[sign_ed:],
@@ -149,8 +150,7 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 	case `aes-ctr-256`:
 		choice |= uint32(cryptoprotect.PICK_AES_CTR_256) << 8
 		c.StreamCipher = &cryptoprotect.AES_CTR{}
-	case `aes-gcm-256`:
-		// not recommanded?
+	case `aes-gcm-256`: // not recommanded?
 		choice |= uint32(cryptoprotect.PICK_AES_GCM_256) << 8
 		c.StreamCipher = &cryptoprotect.AES_GCM{}
 	case `sm4-ofb-256`:
@@ -204,7 +204,7 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 	}
 	/* payload: {choice||token} */
 	res := make([]byte, 4+len(access_token))
-	copy(res[:4], utils.Uint32ToBytesInLittleEndian(choice))
+	copy(res[:4], utils.Uint32ToLittleEndianBytes(choice))
 	copy(res[4:], []byte(access_token))
 
 	cnt, err := c.MiProxy.Write(res)
@@ -385,7 +385,7 @@ func (c *Client) recheckHash(presessionkey *protocol.HandShakeMsg) error {
 		c.MiProxy.CloseAll()
 		return errors.New(protocol.BILATERY_SIGNATURE_FAILURE)
 	}
-	hashX := append(presessionkey.Kern[:], utils.Uint64ToBytesInLittleEndian(presessionkey.Nonce)...)
+	hashX := append(presessionkey.Kern[:], utils.Uint64ToLittleEndianBytes(presessionkey.Nonce)...)
 	hashX = append(hashX, presessionkey.Timestamp...)
 
 	recheck_hash := c.HashCipher.CalculateHash(hashX)
@@ -398,17 +398,17 @@ func (c *Client) recheckHash(presessionkey *protocol.HandShakeMsg) error {
 }
 
 // step 10: generate sessionKey and wait for rn
-func (c *Client) readChallenge(presessionkey *protocol.HandShakeMsg) error {
+func (c *Client) readChallenge(preKey *protocol.HandShakeMsg) error {
 	rn := c.rn
 	tmpKey := protocol.GenerateSessionKey(
-		[cryptoprotect.KeySize]byte(presessionkey.Kern[:cryptoprotect.KeySize]),
+		[cryptoprotect.KeySize]byte(preKey.Kern[:cryptoprotect.KeySize]),
 		rn.Kern,
 		rn.Nonce,
-		presessionkey.Nonce,
+		preKey.Nonce,
 		c.HashCipher,
 	)
 	c.StreamCipher.SetKey(tmpKey[:])
-	c.StreamCipher.SetIv(presessionkey.Kern[cryptoprotect.KeySize : cryptoprotect.KeySize+cryptoprotect.IVSize])
+	c.StreamCipher.SetIv(preKey.Kern[cryptoprotect.KeySize : cryptoprotect.KeySize+cryptoprotect.IVSize])
 	resp_rn, _, err := c.DecRead()
 	status, _ := utils.CompareByteSliceEqualOrNot(resp_rn, rn.Kern[:])
 	if !status {
@@ -451,44 +451,36 @@ func (c *Client) shakeHandReadCoroutine() (rerr error) {
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ppub has recv`)
 	rerr = c.readStep2()
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackcpub has recv`)
 	rerr = c.readStep3( /* 1 read ackcflow1 */ )
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackcflow1 has recv`)
 	pflow1, rerr := c.readStep4() // read pflow1
 	if rerr != nil {
 		return
 	}
-	// log.Println(`pflow1 has recv`)
 	rerr = c.readStep3( /*2 read ackcflow2 */ )
 	if rerr != nil {
 		return
 	}
-	// log.Println(`ackcflow2 has recv`)
 	pflow2, rerr := c.readStep4() // read pflow2
 	if rerr != nil {
 		return
 	}
-	// log.Println(`pflow2 has recv`)
 	presessionkey, rerr := c.pflowConcatAndDecrypt(pflow1, pflow2)
 	if rerr != nil {
 		c.wNotifiedSignal <- false
 		return
 	}
-	// log.Println(`presessionkey has dec`)
 	rerr = c.recheckHash(presessionkey)
 	if rerr != nil {
 		c.wNotifiedSignal <- false
 		return
 	}
-	// log.Println(`presession-hash has dec`)
 	rerr = c.readChallenge(presessionkey)
 	if rerr != nil {
 		c.wNotifiedSignal <- false
@@ -500,25 +492,34 @@ func (c *Client) shakeHandReadCoroutine() (rerr error) {
 }
 
 func (c *Client) shakeHandWriteCoroutine() (werr error) {
-	/* todo:  token and the related configuration read via config.go */
-	werr = c.SendClientHelloPayload(`sm2`, `sm4-ctr-256`, `blake2s256`, `hello world, bed`, `zlib`)
+	if config.GlobalClientConfiguration == nil {
+		werr = errors.New(`configuration has not been set up`)
+		c.wNotifiedSignal <- false
+		c.MiProxy.CloseAll()
+		return
+	}
+	asym_cfg := config.GlobalClientConfiguration.Local.AsymmetricCipher
+	flow_cfg := config.GlobalClientConfiguration.Local.StreamCipher
+	hash_cfg := config.GlobalClientConfiguration.Local.HashCipher
+	zip_cfg := config.GlobalClientConfiguration.Local.CompressedAlgorithm
+	access_token := config.GlobalClientConfiguration.Local.AccessToken
+
+	werr = c.SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, access_token)
 	if werr != nil {
 		c.wNotifiedSignal <- false
 		c.MiProxy.CloseAll()
 		return
 	}
 	c.wNotifiedSignal <- true
-	time.Sleep(time.Millisecond)
+	time.Sleep(time.Millisecond) // todo certain bad implementation.
 	werr = c.writeStep1()
 	if werr != nil {
 		return
 	}
-	// log.Println(`ackppub has sent`)
 	werr = c.writeStep2()
 	if werr != nil {
 		return
 	}
-	// log.Println(`cpub has sent`)
 	c.rn, werr = c.generateRN()
 	if werr != nil {
 		c.MiProxy.CloseAll()
@@ -534,22 +535,18 @@ func (c *Client) shakeHandWriteCoroutine() (werr error) {
 	if werr != nil {
 		return
 	}
-	// log.Println(`cflow1 has sent`)
 	werr = c.writeStep4(1) // ack pflow1
 	if werr != nil {
 		return
 	}
-	// log.Println(`ackppk1 has sent`)
 	werr = c.writeStep3(flow2, 2) // send cflow2
 	if werr != nil {
 		return
 	}
-	// log.Println(`cflow2 has sent`)
 	werr = c.writeStep4(2) // ack pflow2
 	if werr != nil {
 		return
 	}
-	// log.Println(`ackppk2 has sent`)
 	if !<-c.wNotifiedSignal {
 		werr = errors.New(`handshake failed in the middle knowing from reader coroutine`)
 		return
@@ -574,7 +571,6 @@ func (c *Client) Shakehand() (werr error, rerr error) {
 	ip, _ := c.clientAddrSpliter()
 	ping_ref, ok := service.PingWithoutPrint(ip, 3, 5, 5)
 	if !ok {
-		// log.Println(protocol.CLIENT_PREFIX + protocol.BILATERY_FAILED_TO_PING_AND_MEASURE)
 		werr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		rerr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		return

@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 
+	"bingoproxy/utils"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,21 +28,37 @@ type (
 	}
 )
 
-var safe_read sync.RWMutex
+var (
+	safe_read_client          sync.RWMutex
+	GlobalClientConfiguration *ClientCommunicationConfig
+	default_client_path       string = "./example_client.yaml"
+)
 
 func ParseClientYAML(path string) *ClientCommunicationConfig {
-	safe_read.RLock()
+	safe_read_client.RLock()
 	cfg_data, err := os.ReadFile(path)
-	safe_read.RUnlock()
+	safe_read_client.RUnlock()
 	if err != nil {
 		log.Println(err.Error())
 		return nil
 	}
-	var res ClientCommunicationConfig
-	err = yaml.Unmarshal(cfg_data, &res)
+	safe_read_client.Lock()
+	defer safe_read_client.Unlock()
+	GlobalClientConfiguration = &ClientCommunicationConfig{}
+	err = yaml.Unmarshal(cfg_data, GlobalClientConfiguration)
 	if err != nil {
 		log.Println(err.Error())
+		GlobalClientConfiguration = nil
 		return nil
 	}
-	return &res
+	return GlobalClientConfiguration
+}
+
+func init() {
+	// we provide a default configuration, user can reset the configuratoin after initiation.'
+	grandfa_dir, err := utils.GetFilePath(default_client_path)
+	if err != nil {
+		return // keep nil.
+	}
+	ParseClientYAML(grandfa_dir + `/config/` + default_client_path)
 }

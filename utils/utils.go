@@ -22,11 +22,11 @@ compare whether two byte slices are the same.
 */
 func CompareByteSliceEqualOrNot(a []byte, b []byte) (bool, string) {
 	if len(a) != len(b) {
-		return false, `uneq: Len`
+		return false, `unequal: Len`
 	}
 	for idx, val := range a {
 		if val != b[idx] {
-			return false, `uneq: Val`
+			return false, `unequal: Val`
 		}
 	}
 	return true, `ok`
@@ -72,9 +72,7 @@ func GenerateEnterableRandomString(lena int64) string {
 	return string(res)
 }
 
-// warning: `DO NOT EDIT THESE FUNCTIONS' NAMES.`
-
-func Uint64ToBytesInLittleEndian(inp uint64) []byte {
+func Uint64ToLittleEndianBytes(inp uint64) []byte {
 	var res []byte
 	for i := 0; i < 8; i++ {
 		res = append(res, byte((inp>>(i<<3))&0xFF))
@@ -82,42 +80,32 @@ func Uint64ToBytesInLittleEndian(inp uint64) []byte {
 	return res
 }
 
-func Uint32ToBytesInLittleEndian(inp uint32) []byte {
-	var res []byte
-	for i := 0; i < 4; i++ {
-		res = append(res, byte((inp>>(i<<3))&0xFF))
-	}
-	return res
+func Uint32ToLittleEndianBytes(inp uint32) []byte {
+	return []byte{byte(inp), byte(inp >> 8), byte(inp >> 16), byte(inp >> 24)}
 }
 
-func Uint16ToBytesInLittleEndian(inp uint16) []byte {
-	var res []byte
-	for i := 0; i < 2; i++ {
-		res = append(res, byte((inp>>(i<<3))&0xFF))
-	}
-	return res
+func Uint16ToLittleEndianBytes(inp uint16) []byte {
+	return []byte{byte(inp), byte(inp >> 8)}
 }
 
-func BytesToUint16(inp [2]byte) (res uint16) {
+func LittleEndianBytesToUint16(inp [2]byte) (res uint16) {
 	var functor func(byte, int) uint16 = func(b byte, i int) uint16 { return uint16(b) << i }
 	res = functor(inp[0], 0) | functor(inp[1], 8)
 	return
 }
 
-func BytesToUint32(inp [4]byte) (res uint32) {
+func LittleEndianBytesToUint32(inp [4]byte) (res uint32) {
 	var functor func(byte, int) uint32 = func(b byte, i int) uint32 { return uint32(b) << i }
 	res = functor(inp[0], 0) | functor(inp[1], 8) | functor(inp[2], 16) | functor(inp[3], 24)
 	return
 }
 
-func BytesToUint64(inp [8]byte) (res uint64) {
+func LittleEndianBytesToUint64(inp [8]byte) (res uint64) {
 	var functor func(byte, int) uint64 = func(b byte, i int) uint64 { return uint64(b) << i }
 	res = functor(inp[0], 0) | functor(inp[1], 8) | functor(inp[2], 16) | functor(inp[3], 24)
 	res |= functor(inp[4], 32) | functor(inp[5], 40) | functor(inp[6], 48) | functor(inp[7], 56)
 	return
 }
-
-// END OF warning: `DO NOT EDIT THESE FUNCTIONS' NAMES.`
 
 /*
 Interlocking
@@ -128,7 +116,7 @@ Interlocking
 func BytesSpliterInHalfChanceField(a []byte) ([]byte, []byte) {
 	lena := len(a)
 	if lena < 1 {
-		return []byte(``), []byte(``)
+		return []byte{}, []byte{}
 	}
 	portion := generateRandomIntNumber(50, 60)
 	return a[:portion*lena/100], a[portion*lena/100:]

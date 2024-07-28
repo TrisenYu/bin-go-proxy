@@ -7,18 +7,17 @@ import (
 	"os"
 	"sync"
 
-	"bingoproxy/utils"
+	config "bingoproxy/config"
+	utils "bingoproxy/utils"
 )
 
 const (
-	TokenLen = 16
-	letters  = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZCXVBNM"
-	// TODO: read from config and create corresponding implementation
-	ack_path     = `./auth/.proxy-ack.txt`
-	ExpiringTime = 3
+	TokenLen     = 16
+	letters      = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZCXVBNM"
+	ExpiringTime = 3 // TODO
 )
 
-var amu sync.RWMutex
+var authMu sync.RWMutex
 
 func AuthValidation(remote_token []byte) (bool, string) {
 	buf, err := ReadAccessToken()
@@ -33,7 +32,7 @@ func AuthValidation(remote_token []byte) (bool, string) {
 }
 
 func IsAcessTokenExisited() bool {
-	_, err := os.Lstat(ack_path)
+	_, err := os.Lstat(config.GlobalProxyConfiguration.Local.PathToAccessToken)
 	return !os.IsNotExist(err)
 }
 
@@ -43,26 +42,26 @@ func CreateAcessToken() {
 	}
 
 	buf := utils.GenerateEnterableRandomString(TokenLen)
-	err := os.WriteFile(ack_path, []byte(buf), 0o644)
+	err := os.WriteFile(config.GlobalProxyConfiguration.Local.PathToAccessToken, []byte(buf), 0o644)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func ReadAccessToken() ([]byte, error) {
-	amu.RLock()
-	res, err := os.ReadFile(ack_path)
-	amu.RUnlock()
+	authMu.RLock()
+	res, err := os.ReadFile(config.GlobalProxyConfiguration.Local.PathToAccessToken)
+	authMu.RUnlock()
 	if err != nil {
-		return []byte(``), err
+		return []byte{}, err
 	}
 	return res, nil
 }
 
 func RemoveAccessFile() {
-	amu.Lock()
-	err := os.Remove(ack_path)
-	amu.Unlock()
+	authMu.Lock()
+	err := os.Remove(config.GlobalProxyConfiguration.Local.PathToAccessToken)
+	authMu.Unlock()
 	if err != nil {
 		panic(err)
 	}
@@ -71,14 +70,25 @@ func RemoveAccessFile() {
 
 func ChangeToken() string {
 	if !IsAcessTokenExisited() {
-		return ""
+		return ``
 	}
 	res := utils.GenerateEnterableRandomString(TokenLen)
-	amu.Lock()
-	err := os.WriteFile(ack_path, []byte(res), 0o644)
-	amu.Unlock()
+	authMu.Lock()
+	err := os.WriteFile(config.GlobalProxyConfiguration.Local.PathToAccessToken, []byte(res), 0o644)
+	authMu.Unlock()
 	if err != nil {
 		panic(err)
 	}
 	return res
+}
+
+func init() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+	CreateAcessToken()
+	res, err := ReadAccessToken()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println(`accessToken is ` + string(res))
 }
