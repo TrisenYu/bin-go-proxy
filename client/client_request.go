@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 
-	cryptoprotect "bingoproxy/cryptoProtect"
 	defErr "bingoproxy/defErr"
 	protocol "bingoproxy/protocol"
 	utils "bingoproxy/utils"
@@ -32,7 +31,7 @@ func (c *Client) ChangeRemoteServer(addrp []byte) error {
 		fallthrough
 	case io.EOF:
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`unexpected error: proxy is down`, err)
+		return defErr.StrConcat(`unexpected error: proxy is down`, err)
 	default:
 		return err
 	}
@@ -46,7 +45,7 @@ func (c *Client) ChangeRemoteServer(addrp []byte) error {
 	}
 	status, descript := utils.CompareByteSliceEqualOrNot(correspond_resp, []byte(protocol.RESP_recv_server_addrp))
 	if !status {
-		return defErr.DescribeThenConcat(`checked recv-remote-server failed`+descript, rerr)
+		return defErr.StrConcat(`checked recv-remote-server failed`+descript, rerr)
 	}
 	return nil
 }
@@ -58,10 +57,7 @@ func (c *Client) ProactiveAbortConnAsCmd() {
 }
 
 /* TODO: testing and debugging. */
-func (c *Client) ChangeSessionKey(
-	key [cryptoprotect.KeySize]byte,
-	iv [cryptoprotect.IVSize]byte,
-) error {
+func (c *Client) ChangeSessionKey(key, iv []byte) error {
 	_, werr := c.EncWrite(CmdHeaderWrapper(
 		append([]byte(protocol.CMD_refresh_sessionkey), append(key[:], iv[:]...)...)))
 	switch werr {
@@ -70,7 +66,7 @@ func (c *Client) ChangeSessionKey(
 		fallthrough
 	case io.EOF:
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`unexpected error: proxy is down`, werr)
+		return defErr.StrConcat(`unexpected error: proxy is down`, werr)
 	default:
 		return werr
 	}
@@ -80,7 +76,7 @@ func (c *Client) ChangeSessionKey(
 	status, descript := utils.CompareByteSliceEqualOrNot(_finish, []byte(protocol.HANDHLT))
 	if !status {
 		c.MiProxy.CloseAll()
-		return defErr.DescribeThenConcat(`fatal error: can not recv finish from proxy due to`+descript, rerr)
+		return defErr.StrConcat(`fatal error: can not recv finish from proxy due to`+descript, rerr)
 	}
 	return nil
 }

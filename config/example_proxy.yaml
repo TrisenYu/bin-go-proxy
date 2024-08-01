@@ -2,5 +2,5 @@
 # (C) 2024 Author: <kisfg@hotmail.com>
 # DEFINE AS A SAMPLE.
 ProxyConfig:
-  PathToAccessToken: "./.accessToken" # highly recommand set to absolute path instead of relative path.
+  PathToAccessToken: "./.accessToken" # highly recommand to set to absolute path instead of relative path.
   ListeningPort: 9971

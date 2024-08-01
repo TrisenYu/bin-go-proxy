@@ -93,7 +93,7 @@ func TestForwarding(t *testing.T) {
 	log.Println(`End of shakehand.`)
 
 	go func() {
-		key, iv, err := cryptoprotect.GeneratePresessionKey()
+		key, iv, err := cryptoprotect.GeneratePresessionKey(c.StreamCipher)
 		if err != nil {
 			t.Error(err.Error())
 		}

@@ -1,6 +1,6 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package cryptoprotect
+package hashciphers
 
 import "github.com/emmansun/gmsm/sm3"
 
@@ -14,3 +14,5 @@ func (sm *SM3) CalculateHash(msg []byte) []byte {
 	tmp := sm3.Sum(msg)
 	return tmp[:]
 }
+
+func (sm *SM3) GetHashLen() uint64 { return 32 }

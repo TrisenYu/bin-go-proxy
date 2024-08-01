@@ -5,6 +5,7 @@ package utils
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -18,15 +19,16 @@ const letters string = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZ
 /*
 compare whether two byte slices are the same.
 
-	return true, `ok` if true, otherwise return false and the reason.
+	return true, `ok` if two bytesSlices are equal, otherwise return false with the reason.
 */
 func CompareByteSliceEqualOrNot(a []byte, b []byte) (bool, string) {
-	if len(a) != len(b) {
-		return false, `unequal: Len`
+	lena, lenb := len(a), len(b)
+	if lena != lenb {
+		return false, fmt.Sprintf(`unequal: differentLen found:(%d,%d)`, lena, lenb)
 	}
 	for idx, val := range a {
 		if val != b[idx] {
-			return false, `unequal: Val`
+			return false, fmt.Sprintf(`unequal: differentVal found at:%d`, idx)
 		}
 	}
 	return true, `ok`
@@ -122,7 +124,12 @@ func BytesSpliterInHalfChanceField(a []byte) ([]byte, []byte) {
 	return a[:portion*lena/100], a[portion*lena/100:]
 }
 
-func AbsMinusInt[T ~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16](a T, b T) T {
+type _Intx interface {
+	~uint | ~int | ~int32 | ~uint32 | ~int64 | ~uint64 | ~uint16 | ~int16
+}
+
+// get the distance from two (u)int(x) numbers.
+func AbsMinusInt[T _Intx](a T, b T) T {
 	return max(a, b) - min(a, b)
 }
 
@@ -144,4 +151,10 @@ func BytesHexForm(inp []byte) {
 		return
 	}
 	log.Println(hex.EncodeToString(inp))
+}
+
+func ThresholdExceedCheckerViaRatio[T _Intx](
+	ref, gain, numer, denom T,
+) bool {
+	return AbsMinusInt(ref, gain)*numer >= denom*ref
 }

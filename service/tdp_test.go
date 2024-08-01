@@ -11,7 +11,7 @@ import (
 	utils "bingoproxy/utils"
 )
 
-// TODO
+// TO Write in a tidy and clean way.
 func TestUDP(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() {

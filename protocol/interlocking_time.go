@@ -11,6 +11,7 @@ import (
 )
 
 const (
+
 	/* Ten thousand year with the same format as long as all systems are ongoing. */
 	TIME_FORMAT                 string = "2006-01-02 15:04:05.000000"
 	TIME_ZONE_STRING            string = "Asia/Shanghai"
@@ -21,14 +22,17 @@ const (
 		The ack datafield can be configured manually for better replay-attack resistance, but the corresponding
 		modification should be correctly passed to client.
 	*/
+
 	/* handshake: stage 1. */
 	ACKCPUB string = `ACK-CPUB` // Proxy ack cpub
 	ACKPPUB string = `ACK-PPUB` // Client ack ppub
+
 	/* handshake: stage 2 */
 	ACKPPK1 string = `ACK-PPK1` // Client ack ppk1
 	ACKPPK2 string = `ACK-PPK2` // Client ack ppk2
 	ACKCPK1 string = `ACK-CPK1` // Proxy ack cpk1
 	ACKCPK2 string = `ACK-CPK2` // Proxy ack cpk2
+
 	/* handshake: stage 3 */
 	HANDHLT string = `FINISHED` // Client ack p-rn | proxy recv c-ack-p-rn
 )
@@ -38,54 +42,63 @@ type SharedTimeFormat struct {
 	mutter, yummy    sync.RWMutex
 }
 
-// Regularly update TIME_LEN.
 var (
-	calibrated_time_accesser = func() string { return time.Now().In(TIME_ZONE).Format(TIME_FORMAT) }
-	TIME_ZONE, _             = time.LoadLocation(TIME_ZONE_STRING)
-	TIME_LEN                 = SharedTimeFormat{
+	calibrated_time_accesser = func() string { return time.Now().In(timeZone).Format(TIME_FORMAT) }
+	timeZone, _              = time.LoadLocation(TIME_ZONE_STRING)
+	// TODO: Regularly update TIME_LEN.
+	timeLen = SharedTimeFormat{
 		timeLen: uint64(len(calibrated_time_accesser())),
-		yearLen: uint64(len(time.Now().In(TIME_ZONE).Format(`2006`))),
+		yearLen: uint64(len(time.Now().In(timeZone).Format(`2006`))),
 	}
 )
 
+func init() {
+	log.SetFlags(log.Lshortfile | log.Ldate)
+	SafeResetLen()
+}
+
 // safely gain current length of timestamp.
-func (t *SharedTimeFormat) SafeReadTimeLen() uint64 {
+func SafeReadTimeLen() uint64 {
 	var res uint64
-	t.mutter.RLock()
-	res = t.timeLen
-	t.mutter.RUnlock()
+	timeLen.mutter.RLock()
+	res = timeLen.timeLen
+	timeLen.mutter.RUnlock()
 	return res
 }
 
 // safely gain current length of year in timestamp.
-func (t *SharedTimeFormat) SafeReadYearLen() uint64 {
+func SafeReadYearLen() uint64 {
 	var res uint64
-	t.yummy.RLock()
-	res = t.yearLen
-	t.yummy.RUnlock()
+	timeLen.yummy.RLock()
+	res = timeLen.yearLen
+	timeLen.yummy.RUnlock()
 	return res
 }
 
-func (t *SharedTimeFormat) SafeResetLen() string {
+func SafeGainTimestampHashLen() uint64 {
+	return SafeReadTimeLen() + CHOPPING_LENGTH_OF_HASH_VAL
+}
+
+func SafeResetLen() string {
 	res := calibrated_time_accesser()
-	t.mutter.Lock()
-	t.timeLen = uint64(len(res))
-	t.mutter.Unlock()
+	timeLen.mutter.Lock()
+	timeLen.timeLen = uint64(len(res))
+	timeLen.mutter.Unlock()
 
-	t.yummy.Lock()
-	t.yearLen = uint64(len(time.Now().Format(`2006`)))
-	t.yummy.Unlock()
+	timeLen.yummy.Lock()
+	timeLen.yearLen = uint64(len(time.Now().Format(`2006`)))
+	timeLen.yummy.Unlock()
 	return res
 }
 
-func (t *SharedTimeFormat) SafeSetTimeFromTimeStamp(inp time.Time) {
-	t.yummy.Lock()
-	t.yearLen = uint64(len(inp.Format(`2006`)))
-	t.yummy.Unlock()
+func SafeSetTimeFromTimeStamp(inp time.Time) {
+	timeLen.yummy.Lock()
+	timeLen.yearLen = uint64(len(inp.Format(`2006`)))
+	timeLen.yummy.Unlock()
 
-	t.mutter.Lock()
-	t.timeLen = uint64(len(inp.Format(TIME_FORMAT)))
-	t.mutter.Unlock()
+	timeLen.mutter.Lock()
+	timeLen.timeLen = uint64(len(inp.Format(TIME_FORMAT)))
+	timeLen.mutter.Unlock()
 }
 
 // hash(timestamp + ack)[:CHOPPING_LENGTH_OF_HASH_VAL] => send with timestamp as current ack
@@ -110,28 +123,32 @@ func hasSaved(
 	if flag1 || flag2 {
 		*rec_cnt = 0
 		now := []byte(calibrated_time_accesser())
-		// It is better to check the ACKCPUB / ACKPPUB received time here. But in localhost it is relatively sophicated to control.
+		// It is better to check the ACKCPUB / ACKPPUB received time here.
+		// But in localhost it is relatively sophicated to control.
 		// TimeStampMinus(now, checkTime)
-		tmpTimeStamps[0] = now[:]
+		tmpTimeStamps[0] = now
 		*rec_cnt += 1
 		return false
 	}
+
+	// TODO: the parameter should adjust when network condition changes.
 	var upper_bound, lower_bound int64
 	if hasCryptoBurden {
-		upper_bound = ping_val*5/2 + (ping_val % 1000)
-		lower_bound = ping_val/2 - (ping_val % 1000)
+		upper_bound = ping_val*9/4 /* 2.25 RTT */ + (ping_val % 1000)
+		lower_bound = 0
 	} else {
-		upper_bound = ping_val*3/2 + (ping_val % 1000)
-		lower_bound = ping_val/2 + (ping_val % 1000)
+		upper_bound = ping_val*7/4 /* 1.75 RTT */ + (ping_val % 1000)
+		lower_bound = 0 // ping_val/2 + (ping_val % 1000)
 	}
+
 	for idx := 0; idx < *rec_cnt; idx++ {
 		innerFlag, _ := utils.CompareByteSliceEqualOrNot(tmpTimeStamps[idx][:], checkTime[:])
+		/*
+			check whether the timestamp has existed or not And
+			whether the timestamp violates the monotonically increasing order and
+			attempts to cause a birthday problem.
+		*/
 		if innerFlag || !TimeStampCmp(checkTime, tmpTimeStamps[idx]) {
-			/*
-			   check whether the timestamp has existed or not And
-			   whether the timestamp violates the monotonically increasing order and
-			   attempts to cause a birthday problem.
-			*/
 			return true
 		}
 	}
@@ -139,7 +156,8 @@ func hasSaved(
 	jiffy := TimeStampMinus(checkTime, tmpTimeStamps[*rec_cnt-1])
 
 	if jiffy < lower_bound || jiffy > upper_bound {
-		log.Println(`suspection: man in the middle attack`, jiffy, ping_val, lower_bound, upper_bound)
+		// should fall into [lower_bound, upper_bound].
+		log.Println(`suspicion: man in the middle attack`, jiffy, ping_val, lower_bound, upper_bound)
 		return true
 	}
 	tmpTimeStamps[*rec_cnt] = checkTime
@@ -154,24 +172,24 @@ func hasSaved(
 // validate if ack is up to standard by semantic consistency
 func AckFlowValidation(
 	hash_fn cryptoprotect.HashCipher,
-	ack_flow []byte,
-	stage_ack []byte,
+	ack_flow, stage_ack []byte,
 	tmpTimeStamps *[8][]byte,
 	rec_cnt *int,
 	ping_val int64,
 	hasCryptoBurden bool,
 ) bool {
-	time_len := TIME_LEN.SafeReadTimeLen()
-	if uint64(len(ack_flow)) != time_len+CHOPPING_LENGTH_OF_HASH_VAL {
+	time_len := SafeReadTimeLen()
+	required_len := time_len + CHOPPING_LENGTH_OF_HASH_VAL
+	if uint64(len(ack_flow)) != required_len { // semantics failed.
 		return false
 	}
-	time_salt := make([]byte, time_len+8)
+	var time_salt []byte = make([]byte, time_len)
 	copy(time_salt[:time_len], ack_flow[:time_len])
-	if hasSaved(time_salt[:time_len], stage_ack, tmpTimeStamps, rec_cnt, ping_val, hasCryptoBurden) {
+	if hasSaved(time_salt, stage_ack, tmpTimeStamps, rec_cnt, ping_val, hasCryptoBurden) {
 		return false
 	}
-	trunc_it := ack_flow[time_len : time_len+CHOPPING_LENGTH_OF_HASH_VAL]
-	copy(time_salt[time_len:time_len+8], stage_ack)
+	trunc_it := ack_flow[time_len:required_len]
+	time_salt = append(time_salt, stage_ack...)
 	check_it := hash_fn.CalculateHash(time_salt)
 	flag, _ := utils.CompareByteSliceEqualOrNot(check_it[:CHOPPING_LENGTH_OF_HASH_VAL], trunc_it)
 	return flag
@@ -182,7 +200,7 @@ input must be standard timestamp, which is shown below.
 
 	xxxxx-02-02 23:59:59.2333333333
 	0    ^   4  7  a  d  0 23 56  9
-	     |               1        1
+	     |               1 11 11  1
 	  yearlen
 
 the way for turning it into bigInt is to sub each byte with 48 and remove space,dash,colon and point
@@ -190,7 +208,7 @@ the way for turning it into bigInt is to sub each byte with 48 and remove space,
 	xxxxx0202235959233333333
 */
 func TimeStampToBigInt(input []byte) *big.Int {
-	year_len := TIME_LEN.SafeReadYearLen()
+	year_len := SafeReadYearLen()
 	inp := make([]byte, year_len+25 /* magic 25 */)
 	copy(inp[:], input[:])
 	var (
@@ -212,22 +230,26 @@ func TimeStampToBigInt(input []byte) *big.Int {
 	copy(resizer[year_len+10:year_len+19], inp[mil_st:mil_st+9])
 	tmp := new(big.Int)
 	res, _ := tmp.SetString(string(resizer[:year_len+16]), 10)
-	return res
 	// the nano-second measured is not precise now. maybe we can omit it.
+	return res
 }
 
-func TimeStampCmp(inp1, inp2 []byte) bool {
-	val1, val2 := TimeStampToBigInt(inp1), TimeStampToBigInt(inp2)
+func TimeStampCmp(maxn, minn []byte) bool {
+	val1, val2 := TimeStampToBigInt(maxn), TimeStampToBigInt(minn)
 	res := val1.Cmp(val2)
 	return res > 0
 }
 
 /*
 (ping from China to Argentina and receive response from Agentina to China)
-30_0000 * 1000 m / s * 0.191 s = 57300 => 28650 km
+30_0000 * 1000 m / s * 0.191 s = 57300 => 28650 km.
 
-Assuming that the existing(2024) data link does not pass through satellites
-but uses optical fibers or transoceanic cables.
+actually,
+	to the east of Pacific Ocean, the distance, on a straight line, between beijing and Buenos Aires is roughly 22000 km.
+	to the west of Atlantic Ocean, the distance is roughly 20000 km.
+
+
+Assuming that the existing(2024) data link does not pass through satellites but uses optical fibers or transoceanic cables.
 
 For the communicating parties, an intermediary would only be able to successfully deceive both parties
 And continuously eavesdrop on the communication content if he/she effectively utilizes this communication protocol
@@ -240,13 +262,7 @@ is likely to be less effective than a specially trained AI prediction.
 Technically we should collect the historical ping data and combine the network conditions
 (like degree of congestion, changing topology) to determine. But all of this are laborious.
 
-To effectively cope with this, I drew inspiration from `closed-loop control`.
-
-	Output_of_Controller = Kp( err(t) + T_i^{-1} Integrate err(t) dt + T_d d(err(t)) / dt )
-
-the discrete form of RHS is ~
-
-	Kp(err[t] + T_i^{-1} (t-0)sum_{x=0}^{t}err[x] + T_d (err[t]-err[t-1])/△t )
+To effectively cope with this, I drew inspiration from `closed-loop control` but have not yet to implement it.
 */
 
 // return jiffy(us).

@@ -1,5 +1,6 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-ONLY
 // (C) 2024 Author: <kisfg@hotmail.com>
+// ACKNOWLEDGE: https://www.rfc-editor.org/rfc/pdfrfc/rfc6013.txt.pdf
 package service
 
 import (
@@ -14,13 +15,13 @@ import (
 )
 
 /*
-								udp + trusted transmission
+	                              udp + trusted transmission
 
 Designed in an overt scheme.
 
 TODO:
 	write a concrete and specific unit test and validate on real machine and see whether this protocol is able to bypass ISP QoS
-
+	prevent memory leak from the go routine leak
 
 The windows size or group size is intensionally fixed to 128 for simplifying
 the process of adjusting windows size, congestion control and fast retransmission firstly defined in TCP.
@@ -48,16 +49,16 @@ For interference attacked via forged packets (Eg. forged and malicious ack, rst)
 
                                 +----> I think the possibility of lossing all sending windows is impossible
                       4 bytes   |   d c
-                 4 bytes        |   0 1                     0-1023 s 10 bits 1000_000 us
-                 n    n         |    b b b b b b b b        0-1023ms 10 bits 1000 us
-                 _u    u     uint64  i i i i i i i i        0-1023us 10 bits => (0, 0x3D095DD7) us => (u)int32
+                 4 bytes        |   0 1
+                 n    n         |    b b b b b b b b
+                 _u    u     uint64  i i i i i i i i
                  _ m    m    8 bytes t t t t t t t t
-      4 bytes 2B _  b    b   ?                           4bytes 3 byte
-    +--------+---+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
-    |assigned|L  |S   |A   |current |t|a|r|r|s|f|p|a| -|-|Prom|seed4|
-    |        | E |  E |  C | group  |y|c|c|s|y|i|m|v| -|-|ise-|obsc-|
-    |uniqueID|  N|   Q|   K|recv-num|p|k|k|t|n|n|s|d| -|-|time|uring|
-    +--------+---+----+----+--------+-+-+-+-+-+-+-+-+ -+-+----+-----+
+      4 bytes 2B _  b    b   ?                        2bytes seeds   4bytes2 byte
+    +--------+---+----+----+--------+-+-+-+-+-+-+-+-+ -+-+-+-+-+-+-+-+----+-----+
+    |assigned|L  |S   |A   |current |t|a|r|r|s|f|v|a| -|-|-|-|-|-|-|-|4   |crc  |
+    |        | E |  E |  C | group  |y|c|c|s|y|i|r|v| -|-|-|-|-|-|-|-|sign|check|
+    |uniqueID|  N|   Q|   K|recv-num|p|k|k|t|n|n|f|d| -|-|-|-|-|-|-|-|    |sum  |
+    +--------+---+----+----+--------+-+-+-+-+-+-+-+-+ -+-+-+-+-+-+-+-+----+-----+
 	 the length of payload.
 
 This preamble can ought to be compressed after a successfully handshake.
@@ -98,13 +99,26 @@ Architecture:
 	    read-flows < ReadFromUDP >
 	        |
 		flows-parser
-	    /    |      \
-	fresh  halfsync accepted
-	conn    conn     conn
-	   \     |      /
+	         |      \
+	      halfsync accepted
+	       hashPool     conn
+	         |      /
 	    EventHandler -------- drop
 	         |
 	thread-safe-write-back
+
+一个可信连接 <=> 对主机分配的 ID。
+短时间内同一（地址:端口）并发传来的重复/迟到同步请求包，只应受理首个，其余丢弃。
+只为其保留 cookie 和 seed。超时两次后清除二者。
+假如说两台计算机之间并不能通过可靠的 ping 确定通信用时，为了让服务器从没有收到应答的情形脱离，至少要求
+	客户 ack cookie 并通过验证后即可直接接入 accepted 集合。此后每次都需要连同传回的 seed 保护控制域。
+
+	typ | syn ------>
+	<--------- typ | syn | ack
+	[typ | syn | ack | avd] ---->
+
+如果主机 ip 改变但所用的应用还在使用 ID，则变更 ip 需要通过 challenge & response 后才能切换。
+
 
 - write end(yet to implement):
 	    dialUDP => UDPAddr   read data
@@ -139,12 +153,17 @@ type (
 	TDPMapKey struct {
 		choice, idx uint32
 	}
+	// one TDPCB for one port.
 	TDPControlBlock struct {
-		Listener           *net.UDPConn // read packet from infinite loop as a listener.
-		WLock              sync.Mutex   // protect the write side. WriteTo(msg, addr)
-		InnerSets          sync.Map     // map{_sync_state, cnt} => *tdpConn
-		IDreverser         sync.Map     // map{which queue, connID} => cnt in InnerSet
-		ShouldDie          chan struct{}
+		/*
+			read packet from infinite loop as a listener.
+			write packet to remote host.
+		*/
+		Listener           *net.UDPConn
+		WLock              sync.Mutex // protect the write side. WriteTo(msg, addr)
+		InnerSets          sync.Map   // map{_sync_state, cnt} => *tdpConn
+		IDreverser         sync.Map   // map{which queue, connID} => cnt in InnerSet
+		ChShouldDie        chan struct{}
 		InnerSetsCnt       [2]atomic.Uint32
 		SucideReadSign     atomic.Bool
 		SucideParseSign    atomic.Bool
@@ -188,53 +207,17 @@ const (
 	MAXNUM_OF_EVENT = 8192
 
 	// the postion of each domain defined in one packet.
-	SYNTAX_ID       uint32 = 0  // 0 ... 3 ID for identifying remote connection.
-	SYNTAX_DATALEN  uint32 = 4  // 4 ... 6 DATALEN for indicating the length of payload instead of total packet.
-	SYNTAX_SEQ      uint32 = 6  // 6 ... 9 SEQ.
-	SYNTAX_ACK      uint32 = 10 // 10 ... 13 ACK
-	SYNTAX_ADVANCK  uint32 = 14 // 14 ... 22 PREACK: the mask of receiving advanced packets.
-	SYNTAX_BITS     uint32 = 22 // 22 ... 23 BITS: control flag.
-	SYNTAX_PMSVAL   uint32 = 23 // 23 ... 27 PMSVAL: promised next arriving time.
-	SYNTAX_BASICLIM uint32 = 23 // BASICLIM: basic limitation of the length of a packet.
-	SYNTAX_SEED     uint32 = 27 // 27 ... 30
-	SYNTAX_BOUNDARY uint32 = 30 // The boundary of header.
+	TDP_SYNTAX_ID       uint32 = 0  // 0 ... 3 ID for identifying remote connection.
+	TDP_SYNTAX_DATALEN  uint32 = 4  // 4 ... 6 DATALEN for indicating the length of payload instead of total packet.
+	TDP_SYNTAX_SEQ      uint32 = 6  // 6 ... 9 SEQ.
+	TDP_SYNTAX_ACK      uint32 = 10 // 10 ... 13 ACK
+	TDP_SYNTAX_ADVANCK  uint32 = 14 // 14 ... 22 PREACK: the mask of receiving advanced packets.
+	TDP_SYNTAX_BITS     uint32 = 22 // 22 ... 23 BITS: control flag.
+	TDP_SYNTAX_PMSVAL   uint32 = 23 // 23 ... 27 PMSVAL: promised next arriving time.
+	TDP_SYNTAX_BASICLIM uint32 = 23 // BASICLIM: basic limitation of the length of a packet.
+	TDP_SYNTAX_SEED     uint32 = 27 // 27 ... 30
+	TDP_SYNTAX_BOUNDARY uint32 = 30 // The boundary of header.
 )
-
-func RefTimeEvolution(
-	last_timeval,
-	curr_timeval,
-	time_interval uint64,
-) (adjust_val uint64) {
-	/* TODO
-	   +----> measured error
-	   |
-	   +----> intergrate, const
-	   |
-	   +----> derivate, const
-	*/
-	return
-}
-
-func FillHeader(
-	id, seq, ack uint32,
-	payloadLen uint16, advanck uint64,
-	bits __tdp_bits__,
-	paddedOrNot bool, pms uint32, seed [3]byte,
-) []byte {
-	a := utils.Uint32ToLittleEndianBytes(id)
-	a = append(a, utils.Uint16ToLittleEndianBytes(payloadLen)...)
-	a = append(a, utils.Uint32ToLittleEndianBytes(seq)...)
-	a = append(a, utils.Uint32ToLittleEndianBytes(ack)...)
-	a = append(a, utils.Uint64ToLittleEndianBytes(advanck)...)
-	a = append(a, byte(bits))
-
-	if !paddedOrNot {
-		return a
-	}
-	a = append(a, utils.Uint32ToLittleEndianBytes(pms)...)
-	a = append(a, seed[:]...)
-	return a
-}
 
 func (tdp *TDPControlBlock) initQueues() {
 	tdp.ParserQueue.Init(MAXNUM_OF_CONN)
@@ -352,6 +335,7 @@ func ReverseIDMessagefunctor(inp TDPItem) ReverseIDMessage {
 	case ReverseIDMessage:
 		return x
 	default:
+		// use (0, nil) as invalid representation.
 		return ReverseIDMessage{Idx: 0, Msg: nil}
 	}
 }
@@ -461,6 +445,7 @@ once timeout, remove item from corresponding queue via eventhandler.
 For late, TODO: ignore by checking current state.
 
 	To diminish the complexity, this function still needs narrowing to several new functions.
+	We have gone too far...
 */
 func (tdp *TDPControlBlock) bitsIdentifier(
 	invoked_from __tdp_handler_id__,
@@ -469,19 +454,18 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 	msg []byte,
 ) (shouldSkip bool) {
 	shouldSkip = false
-	_8bits_ := __tdp_bits__(msg[SYNTAX_BITS])
+	_8bits_ := __tdp_bits__(msg[TDP_SYNTAX_BITS])
 
 	/* functors */
 
 	/* return true if invalid otherwise false. */
 	seqack_faultChecker_SetBackWhenRight := func(msg []byte) bool {
-		seq := utils.LittleEndianBytesToUint32([4]byte(msg[SYNTAX_SEQ:SYNTAX_ACK]))
-		ack := utils.LittleEndianBytesToUint32([4]byte(msg[SYNTAX_ACK:SYNTAX_ADVANCK]))
+		seq := utils.LittleEndianBytesToUint32([4]byte(msg[TDP_SYNTAX_SEQ:TDP_SYNTAX_ACK]))
+		ack := utils.LittleEndianBytesToUint32([4]byte(msg[TDP_SYNTAX_ACK:TDP_SYNTAX_ADVANCK]))
 		if tdpConn.Ack+1 != ack && tdpConn.Seq+1 != seq {
 			return true
 		}
-		tdpConn.Seq = seq
-		tdpConn.Ack = ack
+		tdpConn.Seq, tdpConn.Ack = seq, ack
 		return false
 	}
 	pmsBytes2int64_functor := func(pms_val [4]byte) int64 {
@@ -511,27 +495,29 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 		return
 
 	case TYP | SYN | PMS:
-		// TODO: reduplicated packet sent from the same host.
+		// TODO: duplicated packets sent from the same host while the first one does not complete.
 
 		/* no tdpConn when dealing with current situation. */
 		if invoked_from != HID_FRESH {
 			shouldSkip = true
 			return
 		}
-
-		ping_ref, valid := PingWithoutPrint(fresh_addr.String(), 3, 5, 5)
+		// 电脑上都有防火墙，如果借助 ping 来探查，先前定的握手协议
+		ping_ref, valid := PingWithoutPrint(fresh_addr.String(), 2, 8, 8, 5)
 		if !valid {
 			/* the validation of accessibility. */
 			shouldSkip = true
 			return
 		}
-		us := pmsBytes2int64_functor([4]byte(msg[SYNTAX_PMSVAL:SYNTAX_SEED]))
-		if utils.AbsMinusInt(us, ping_ref)*2 >= ping_ref*3 {
+
+		us := pmsBytes2int64_functor([4]byte(msg[TDP_SYNTAX_PMSVAL:TDP_SYNTAX_SEED]))
+		if utils.ThresholdExceedCheckerViaRatio(ping_ref, us, 2, 3) {
 			/* semanteme validation failed. */
 			shouldSkip = true
 			return
 		}
-		_seq := msg[SYNTAX_SEQ:SYNTAX_ACK]
+
+		_seq := msg[TDP_SYNTAX_SEQ:TDP_SYNTAX_ACK]
 		assigned_id := make([]byte, 4)
 	regain:
 		rand.Read(assigned_id)
@@ -559,7 +545,7 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 		var tmp [3]byte = [3]byte{}
 		rand.Read(tmp[:]) // Generate seed for the sender.
 		copy(record.Seed[3:6], tmp[:])
-		copy(record.Seed[:3], msg[SYNTAX_SEED:SYNTAX_BOUNDARY])
+		copy(record.Seed[:3], msg[TDP_SYNTAX_SEED:TDP_SYNTAX_BOUNDARY])
 		tdp.addOneConnetionToHalfSync(curr_conn_id, record)
 
 		go func() {
@@ -582,8 +568,9 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 			return
 		}
 
-		us := pmsBytes2int64_functor([4]byte(msg[SYNTAX_PMSVAL:SYNTAX_SEED]))
-		if utils.AbsMinusInt(us, int64(tdpConn.RefTime))*2 >= int64(tdpConn.RefTime)*3 ||
+		us := pmsBytes2int64_functor([4]byte(msg[TDP_SYNTAX_PMSVAL:TDP_SYNTAX_SEED]))
+
+		if utils.ThresholdExceedCheckerViaRatio(int64(tdpConn.RefTime), us, 2, 3) ||
 			seqack_faultChecker_SetBackWhenRight(msg) {
 			/* semanteme validation failed. */
 			shouldSkip = true
@@ -600,7 +587,7 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 		mean_time := (int64(tdpConn.RefTime) + us) / 2
 		tdp.removeOneConnectionFromHalfSync(tdpConn, cnt)
 		tdp.addOneConnectionToAccepted(tdpConn)
-		copy(tdpConn.Seed[3:6], msg[SYNTAX_SEED:SYNTAX_BOUNDARY])
+		copy(tdpConn.Seed[3:6], msg[TDP_SYNTAX_SEED:TDP_SYNTAX_BOUNDARY])
 		tdpConn.CurrentState.Store(uint32(SYNC1_2))
 		var tmp_seed [3]byte = [3]byte{}
 		rand.Read(tmp_seed[:])
@@ -696,6 +683,7 @@ func (tdp *TDPControlBlock) homomorphyHandler(invoker __tdp_handler_id__) {
 	}
 
 	for judger() {
+		// what if there is no producer any more and the executing flow stucks at here?
 		raw_msg := selective_queue.PopFront()
 		_msg := ReverseIDMessagefunctor(raw_msg)
 		if _msg.Idx == 0 && _msg.Msg == nil {
@@ -714,13 +702,10 @@ func (tdp *TDPControlBlock) homomorphyHandler(invoker __tdp_handler_id__) {
 }
 
 func (tdp *TDPControlBlock) FreshHandler(addr *net.UDPAddr, msg []byte) {
-	if uint32(len(msg)) != SYNTAX_BOUNDARY {
+	if uint32(len(msg)) != TDP_SYNTAX_BOUNDARY {
 		return // drop this.
 	}
-	// TODO: checksum for consistency.
-	// 		 is the packet really late for building connection?
-	//		 we should check by simply hash?
-
+	// drop duplicated (addr, port) before generating sessionID.
 	if tdp.bitsIdentifier(HID_FRESH, nil, addr, msg) {
 		return
 	}
@@ -775,10 +760,10 @@ func (tdp *TDPControlBlock) EventAnalyzer() {
 }
 
 func (tdp *TDPControlBlock) parserFunctor(msg []byte, addr *net.UDPAddr) {
-	if msg == nil || uint32(len(msg)) <= SYNTAX_BASICLIM {
+	if msg == nil || uint32(len(msg)) <= TDP_SYNTAX_BASICLIM {
 		return
 	}
-	id := utils.LittleEndianBytesToUint32([4]byte(msg[:SYNTAX_DATALEN]))
+	id := utils.LittleEndianBytesToUint32([4]byte(msg[:TDP_SYNTAX_DATALEN]))
 	/*
 		TODO: if there are any risks generated from tons of concurrency
 				caused by malicious or undeliberate operation ?
@@ -809,7 +794,7 @@ func (tdp *TDPControlBlock) parserFunctor(msg []byte, addr *net.UDPAddr) {
 	go func() { tdp.FreshHandler(addr, msg) }()
 }
 
-func (tdp *TDPControlBlock) singleflowParser() {
+func (tdp *TDPControlBlock) singleFlowParser() {
 	for tdp.SafeReadSucideParseSign() {
 		_msg := tdp.ParserQueue.PopFront()
 		switch ams := _msg.(type) {
@@ -827,7 +812,7 @@ func (tdp *TDPControlBlock) emptyChecker() bool {
 		tdp.HalfSyncQueue == nil || tdp.AcceptedQueue == nil
 }
 
-func (tdp *TDPControlBlock) Comprehensive(op_fn func( /* remain to be designed */ )) {
+func (tdp *TDPControlBlock) Comprehensive(inner_monitor_fn func( /* remain to be designed */ )) {
 	if tdp.emptyChecker() {
 		tdp.initQueues()
 	}
@@ -835,8 +820,8 @@ func (tdp *TDPControlBlock) Comprehensive(op_fn func( /* remain to be designed *
 	wg.Add(5)
 	wg_done := make(chan struct{})
 
-	go func() { op_fn(); wg.Done() }()
-	go func() { tdp.singleflowParser(); /* parser-loop */ wg.Done() }()
+	go func() { inner_monitor_fn(); wg.Done() }()
+	go func() { tdp.singleFlowParser(); /* parser-loop */ wg.Done() }()
 	go func() { tdp.homomorphyHandler(HID_HALFSYNC); /* halfsync-loop */ wg.Done() }()
 	go func() { tdp.homomorphyHandler(HID_ACCEPTED); /* accepted-loop */ wg.Done() }()
 	go func() { tdp.spinningReadFlows(); /* read-flows */ wg.Done() }()
@@ -850,7 +835,7 @@ func (tdp *TDPControlBlock) Comprehensive(op_fn func( /* remain to be designed *
 	*/
 	case <-wg_done:
 		return
-	case <-tdp.ShouldDie:
+	case <-tdp.ChShouldDie:
 		log.Println(`received die signal`)
 		return
 	}

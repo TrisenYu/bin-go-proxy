@@ -7,6 +7,11 @@ import (
 )
 
 type (
+	UntrustedConn struct {
+		Addr   *net.UDPAddr
+		State  atomic.Uint32
+		Cookie []byte
+	}
 	TDPConn struct {
 		Addr         *net.UDPAddr
 		Local        *net.UDPConn
@@ -14,7 +19,7 @@ type (
 		Seq, Ack     uint32
 		CurrentState atomic.Uint32
 		XorKey       [3]byte
-		TimeoutCnt   byte
+		TimeoutCnt   byte // Strikeouts
 		Seed         [12]byte
 		/*
 			for sendbuf and receive buffer, both of them need to set deadline for each packet.
@@ -54,8 +59,8 @@ func (tdp *TDPConn) PacketTimeout(
 		tdp.TimeoutCnt += 1
 		return TDPTimeoutID{QID: uint32(qid), CID: tdp.ID, PID: packetID, State: PromoteConnTimeout}
 	case res := <-*target_ch:
-		close(*target_ch) // once receive, we shall close.
 		timer.Stop()
+		close(*target_ch) // once receive, we shall close.
 		return res
 	}
 }

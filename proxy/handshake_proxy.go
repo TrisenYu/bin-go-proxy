@@ -1,13 +1,17 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
+
 package proxy
 
 import (
 	"errors"
 	"time"
 
-	"bingoproxy/auth"
+	auth "bingoproxy/auth"
 	cryptoprotect "bingoproxy/cryptoProtect"
+	asymmetricciphers "bingoproxy/cryptoProtect/asymmetricCiphers"
+	hashciphers "bingoproxy/cryptoProtect/hashCiphers"
+	streamciphers "bingoproxy/cryptoProtect/streamCiphers"
 	zipper "bingoproxy/cryptoProtect/zipper"
 	defErr "bingoproxy/defErr"
 	protocol "bingoproxy/protocol"
@@ -16,22 +20,21 @@ import (
 )
 
 /*
-TODO: speed limitation for preventing DDos.
-    we need tact for single ip
-                 for fake ips
-*/
+ * TODO: speed limitation for preventing DDos.
+ *    we need tact for single ip
+ *                 for fake ips
+ */
 
 /*
-invoke this after initialize `client_asymmetric_pub`.
-
-	serialize the handshake-msg into bytes, then encrypt with client_pub
-*/
+ * invoke this after initialize `client_asymmetric_pub`.
+ *	serialize the handshake-msg into bytes, then encrypt with client_pub
+ */
 func (ep *EncFlowProxy) cPubEncrypt(handshake *protocol.HandShakeMsg) ([]byte, error) {
 	serialization := make([]byte, 0)
-	serialization = append(serialization, handshake.Kern[:]...)
 	serialization = append(serialization, utils.Uint64ToLittleEndianBytes(handshake.Nonce)...)
-	serialization = append(serialization, handshake.Hasher[:]...)
-	serialization = append(serialization, handshake.Signature[:]...)
+	serialization = append(serialization, handshake.Kern...)
+	serialization = append(serialization, handshake.Hasher...)
+	serialization = append(serialization, handshake.Signature...)
 	serialization = append(serialization, handshake.Timestamp...)
 	encrypt_msg, err := ep.ClientAsymmCipher.PubEncrypt(serialization)
 	return encrypt_msg, err
@@ -44,38 +47,72 @@ func (ep *EncFlowProxy) decryptHandShakeMsg(enc []byte) ([]byte, error) {
 
 func (ep *EncFlowProxy) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg, error) {
 	var (
-		iv_ed    = cryptoprotect.KeySize + cryptoprotect.IVSize
-		nonce_ed = iv_ed + 8
-		hash_ed  = nonce_ed + cryptoprotect.HashSize
-		sign_ed  = hash_ed + cryptoprotect.SignSize
+		nonce_ed uint64 = 8
+		iv_ed           = nonce_ed + ep.KeyLen + ep.IvLen
+		hash_ed         = iv_ed + ep.HashCipher.GetHashLen()
+		sign_ed         = hash_ed + ep.AsymmCipher.GetSignatureLen()
 	)
-	if uint64(len(msg)-sign_ed) != protocol.TIME_LEN.SafeReadTimeLen() {
+	now := protocol.SafeReadTimeLen()
+	if uint64(len(msg))-sign_ed != now {
 		return &protocol.HandShakeMsg{}, errors.New(protocol.CLIENT_FAKE_HANDSHAKE)
 	}
-	var (
-		ker    [cryptoprotect.KeySize + cryptoprotect.IVSize]byte
-		hasher [cryptoprotect.HashSize]byte
-		signer [cryptoprotect.SignSize]byte
-	)
-	copy(ker[:], msg[:iv_ed])
-	copy(hasher[:], msg[nonce_ed:hash_ed])
-	copy(signer[:], msg[hash_ed:sign_ed])
 
 	var handshakemsg protocol.HandShakeMsg = protocol.HandShakeMsg{
-		Kern:      ker,
-		Nonce:     utils.LittleEndianBytesToUint64([8]byte(msg[iv_ed:nonce_ed])),
-		Hasher:    hasher,
-		Signature: signer,
+		Nonce:     utils.LittleEndianBytesToUint64([8]byte(msg[:nonce_ed])),
+		Kern:      msg[nonce_ed:iv_ed],
+		Hasher:    msg[iv_ed:hash_ed],
+		Signature: msg[hash_ed:sign_ed],
 		Timestamp: msg[sign_ed:],
 	}
 	return &handshakemsg, nil
 }
 
-func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from config*/ ) error {
+/* Must ensure the pubkey has been generated before invoking this. */
+func (ep *EncFlowProxy) GeneratePresessionKey() (*protocol.HandShakeMsg, error) {
+	key, iv, err := cryptoprotect.GeneratePresessionKey(ep.StreamCipher)
+	if err != nil {
+		return nil, err
+	}
+	nonceIn64, nonce, err := protocol.GenerateRandUint64WithByteRepresentation()
+	if err != nil {
+		return nil, err
+	}
+	now := []byte(protocol.SafeResetLen())
+	var (
+		nonce_ed uint64 = 8
+		iv_ed           = ep.KeyLen + ep.IvLen + nonce_ed
+	)
+	KeyIv := make([]byte, iv_ed-nonce_ed)
+
+	ep.StreamCipher.SetKey(key)
+	ep.StreamCipher.SetIv(iv)
+	copy(KeyIv[:ep.KeyLen], key)
+	copy(KeyIv[ep.KeyLen:], iv)
+
+	kern := []byte(nonce)
+	kern = append(kern, KeyIv...)
+	kern = append(kern, now...)
+	hasher := ep.HashCipher.CalculateHash(kern)
+	signature, err := ep.AsymmCipher.PemSign(hasher)
+	if err != nil {
+		return nil, err
+	}
+	server_hello := protocol.HandShakeMsg{
+		Nonce:     nonceIn64,
+		Kern:      KeyIv,
+		Hasher:    hasher,
+		Signature: signature,
+		Timestamp: now,
+	}
+
+	return &server_hello, nil
+}
+
+func (ep *EncFlowProxy) ProxyReadHello() error {
 	client_hello, cnt, err := ep.Client.Read()
 
 	if cnt != 4+auth.TokenLen || err != nil {
-		return defErr.DescribeThenConcat(`unable to read crypto domain or err:`, err)
+		return defErr.StrConcat(`unable to read crypto domain or err:`, err)
 	}
 	token := client_hello[4:]
 	state, descript := auth.AuthValidation(token)
@@ -85,51 +122,65 @@ func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from 
 
 	_crypto_suite := [4]byte(client_hello[:4])
 	crypto_suite := utils.LittleEndianBytesToUint32(_crypto_suite)
-	var functor func(uint32, int) byte = func(u uint32, i int) byte { return byte((u >> i) & 0xFF) }
+	functor := func(u uint32, i int) byte { return byte((u >> i) & 0xFF) }
 
 	switch functor(crypto_suite, 0) {
 	case byte(cryptoprotect.PICK_SM2):
-		ep.AsymmCipher = &cryptoprotect.SM2{}
-		ep.ClientAsymmCipher = &cryptoprotect.SM2{} // use the same asymmetric-crypto-suite
+		ep.AsymmCipher = &asymmetricciphers.SM2{}
+		ep.ClientAsymmCipher = &asymmetricciphers.SM2{} // use the same asymmetric-crypto-suite
 		ep.AsymmCipher.GenerateKeyPair()
 	default:
 		return errors.New(`unsupported asymmetric cipher`)
 	}
 
+	// TODO: We need a more elegant method to load the final cipher object rather than hard-encode.
 	switch functor(crypto_suite, 8) {
 	case byte(cryptoprotect.PICK_ZUC):
-		ep.StreamCipher = &cryptoprotect.ZUC{}
+		ep.StreamCipher = &streamciphers.ZUC{}
 	case byte(cryptoprotect.PICK_SALSA20):
-		ep.StreamCipher = &cryptoprotect.Salsa20{}
+		ep.StreamCipher = &streamciphers.Salsa20{}
 	case byte(cryptoprotect.PICK_AES_OFB_256):
-		ep.StreamCipher = &cryptoprotect.AES_OFB{}
+		ep.StreamCipher = &streamciphers.AES_OFB_256{}
 	case byte(cryptoprotect.PICK_AES_CTR_256):
-		ep.StreamCipher = &cryptoprotect.AES_CTR{}
+		ep.StreamCipher = &streamciphers.AES_CTR_256{}
 	case byte(cryptoprotect.PICK_AES_GCM_256):
-		ep.StreamCipher = &cryptoprotect.AES_GCM{}
-	case byte(cryptoprotect.PICK_SM4_OFB_256):
-		ep.StreamCipher = &cryptoprotect.SM4_OFB{}
-	case byte(cryptoprotect.PICK_SM4_CTR_256):
-		ep.StreamCipher = &cryptoprotect.SM4_CTR{}
-	case byte(cryptoprotect.PICK_SM4_GCM_256):
-		ep.StreamCipher = &cryptoprotect.SM4_GCM{}
+		ep.StreamCipher = &streamciphers.AES_GCM_256{}
+	case byte(cryptoprotect.PICK_SM4_OFB_128):
+		ep.StreamCipher = &streamciphers.SM4_OFB{}
+	case byte(cryptoprotect.PICK_SM4_CTR_128):
+		ep.StreamCipher = &streamciphers.SM4_CTR{}
+	case byte(cryptoprotect.PICK_SM4_GCM_128):
+		ep.StreamCipher = &streamciphers.SM4_GCM{}
 	case byte(cryptoprotect.PICK_CHACHA20POLY1305_256):
-		ep.StreamCipher = &cryptoprotect.Chacha20poly1305{}
+		ep.StreamCipher = &streamciphers.Chacha20poly1305{}
 	default:
 		return errors.New(`unsupported stream cipher`)
 	}
+	ep.KeyLen, ep.IvLen = ep.StreamCipher.GetKeyLen(), ep.StreamCipher.GetIvLen()
 
 	switch functor(crypto_suite, 16) {
 	case byte(cryptoprotect.PICK_SM3):
-		ep.HashCipher = &cryptoprotect.SM3{}
+		ep.HashCipher = &hashciphers.SM3{}
 	case byte(cryptoprotect.PICK_SHA256):
-		ep.HashCipher = &cryptoprotect.Sha256{}
+		ep.HashCipher = &hashciphers.Sha256{}
 	case byte(cryptoprotect.PICK_SHA3_256):
-		ep.HashCipher = &cryptoprotect.Sha3_256{}
+		ep.HashCipher = &hashciphers.Sha3_256{}
+	case byte(cryptoprotect.PICK_SHA384):
+		ep.HashCipher = &hashciphers.Sha384{}
+	case byte(cryptoprotect.PICK_SHA3_384):
+		ep.HashCipher = &hashciphers.Sha3_384{}
+	case byte(cryptoprotect.PICK_SHA512):
+		ep.HashCipher = &hashciphers.Sha512{}
+	case byte(cryptoprotect.PICK_SHA3_512):
+		ep.HashCipher = &hashciphers.Sha3_256{}
 	case byte(cryptoprotect.PICK_BLAKE2B256):
-		ep.HashCipher = &cryptoprotect.Blake2b256{}
+		ep.HashCipher = &hashciphers.Blake2b256{}
 	case byte(cryptoprotect.PICK_BLAKE2S256):
-		ep.HashCipher = &cryptoprotect.Blake2s256{}
+		ep.HashCipher = &hashciphers.Blake2s256{}
+	case byte(cryptoprotect.PICK_BLAKE2B384):
+		ep.HashCipher = &hashciphers.Blake2b384{}
+	case byte(cryptoprotect.PICK_BLAKE2B512):
+		ep.HashCipher = &hashciphers.Blake2b512{}
 	default:
 		return errors.New(`unsupported hash cipher`)
 	}
@@ -143,55 +194,6 @@ func (ep *EncFlowProxy) ProxyReadHello( /* TODO: token should be extracted from 
 		return errors.New(`unsupproted compressed algorithm`)
 	}
 	return nil
-}
-
-/* Must ensure the pubkey has been generated before invoking this. */
-func (ep *EncFlowProxy) GeneratePresessionKey() (*protocol.HandShakeMsg, error) {
-	key, iv, err := cryptoprotect.GeneratePresessionKey()
-	if err != nil {
-		return nil, err
-	}
-
-	nonceIn64, nonce, err := protocol.GenerateRandUint64WithByteRepresentation()
-	if err != nil {
-		return nil, err
-	}
-	str_now := protocol.TIME_LEN.SafeResetLen()
-	now := []byte(str_now)
-
-	iv_ed := cryptoprotect.KeySize + cryptoprotect.IVSize
-	kern := make([]byte, iv_ed+8)
-	var (
-		KeyIv     [cryptoprotect.KeySize + cryptoprotect.IVSize]byte
-		hasher    [cryptoprotect.HashSize]byte
-		signature [cryptoprotect.SignSize]byte
-	)
-	ep.StreamCipher.SetKey(key)
-	ep.StreamCipher.SetIv(iv)
-
-	copy(KeyIv[:cryptoprotect.KeySize], key)
-	copy(KeyIv[cryptoprotect.KeySize:], iv)
-
-	copy(kern[:iv_ed], KeyIv[:])
-	copy(kern[iv_ed:iv_ed+8], nonce)
-	kern = append(kern, now...)
-	hashInCalc := ep.HashCipher.CalculateHash(kern)
-	copy(hasher[:], hashInCalc)
-
-	_signature, err := ep.AsymmCipher.PemSign(hasher[:])
-	if err != nil {
-		return nil, err
-	}
-	copy(signature[:], _signature)
-	server_hello := protocol.HandShakeMsg{
-		Kern:      KeyIv,
-		Nonce:     nonceIn64,
-		Hasher:    hasher,
-		Signature: signature,
-		Timestamp: now,
-	}
-
-	return &server_hello, nil
 }
 
 // step 1 send ppub
@@ -216,23 +218,25 @@ func (ep *EncFlowProxy) readStep1() error {
 		ep.pingRef,
 		false) {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_VALIDATE_ACKPPUB, err)
+		return defErr.StrConcat(protocol.FAILED_TO_VALIDATE_ACKPPUB, err)
 	}
 	return nil
 }
 
 // step 2 recv CPUB
 func (ep *EncFlowProxy) readStep2() error {
-	pub, _, err := ep.Client.Read()
-	if err != nil {
+	should_kill := func() {
 		ep.wNeedBytes <- []byte{}
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_RECV_COMPRESSED_CPUB, err)
+	}
+	pub, _, err := ep.Client.Read()
+	if err != nil {
+		should_kill()
+		return defErr.StrConcat(protocol.FAILED_TO_RECV_COMPRESSED_CPUB, err)
 	}
 	p, err := ep.CompOption.DecompressMsg(pub)
 	if err != nil {
-		ep.wNeedBytes <- []byte{}
-		ep.Client.CloseAll()
+		should_kill()
 		return err
 	}
 	ep.wNeedBytes <- p
@@ -270,7 +274,7 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 	cnt, err := ep.Client.Write(pf)
 	if err != nil || cnt != uint(len(pf)) {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_SEND_COMPRESSED_PFLOW, err)
+		return defErr.StrConcat(protocol.FAILED_TO_SEND_COMPRESSED_PFLOW, err)
 	}
 	// log.Println(`wait pflow`, turn)
 	pack := <-ep.wNeedBytes
@@ -297,11 +301,10 @@ func (ep *EncFlowProxy) writeStep4(pflow []byte, turn int) error {
 // step3 recv ackpflow1 | ackpflow2
 func (ep *EncFlowProxy) readStep4() error {
 	ackppk, cnt, err := ep.Client.Read()
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
-		err != nil {
+	if uint64(cnt) != protocol.SafeGainTimestampHashLen() || err != nil {
 		ep.wNeedBytes <- []byte{}
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_PARSE_ACKPFLOW, err)
+		return defErr.StrConcat(protocol.FAILED_TO_PARSE_ACKPFLOW, err)
 	}
 	ep.wNeedBytes <- ackppk
 	return nil
@@ -325,27 +328,27 @@ func (ep *EncFlowProxy) writeStep3(turn int) error {
 	curr, res := protocol.AckToTimestampHash(ep.HashCipher, choice)
 	cnt, err := ep.Client.Write(append(curr, res...))
 
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
-		err != nil {
+	if uint64(cnt) != protocol.SafeGainTimestampHashLen() || err != nil {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.FAILED_TO_SEND_ACKCFLOW, err)
+		return defErr.StrConcat(protocol.FAILED_TO_SEND_ACKCFLOW, err)
 	}
 	return nil
 }
 
 // step3 recv cflow1 | cflow2
 func (ep *EncFlowProxy) readStep3() ([]byte, error) {
-	cf, _, err := ep.Client.Read()
-	if err != nil {
+	mission_failed := func(err error) ([]byte, error) {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
 		return []byte{}, err
 	}
+	cf, _, err := ep.Client.Read()
+	if err != nil {
+		return mission_failed(err)
+	}
 	cflow, err := ep.CompOption.DecompressMsg(cf)
 	if err != nil {
-		ep.rSignal <- false
-		ep.Client.CloseAll()
-		return []byte{}, err
+		return mission_failed(err)
 	}
 	ep.rSignal <- true
 	return cflow, nil
@@ -357,27 +360,28 @@ func (ep *EncFlowProxy) rnAndDecrypt(cpk1, cpk2 []byte) (*protocol.HandShakeMsg,
 	rn_pck, err := ep.decryptHandShakeMsg(cpk)
 	if err != nil {
 		ep.Client.CloseAll()
-		return nil, defErr.DescribeThenConcat(protocol.P_PREFIX+protocol.BILATERY_PEM_DECRYPTION_FAILED, err)
+		return nil, defErr.StrConcat(protocol.P_PREFIX+protocol.BILATERY_PEM_DECRYPTION_FAILED, err)
 	}
 	rn, err := ep.extractHandShakeMsg(rn_pck)
 	if err != nil {
 		ep.Client.CloseAll()
-		return nil, defErr.DescribeThenConcat(protocol.FAILED_TO_EXTRACT_RN, err)
+		return nil, defErr.StrConcat(protocol.FAILED_TO_EXTRACT_RN, err)
 	}
 	return rn, nil
 }
 
 // step 9: verify hash and check for hash
 func (ep *EncFlowProxy) recheckHash(rn *protocol.HandShakeMsg) error {
-	verified := ep.ClientAsymmCipher.PubVerify(rn.Hasher[:], rn.Signature[:])
+	verified := ep.ClientAsymmCipher.PubVerify(rn.Hasher, rn.Signature)
 	if !verified {
 		ep.Client.CloseAll()
 		return errors.New(protocol.BILATERY_SIGNATURE_FAILURE)
 	}
-	hashX := append(rn.Kern[:], utils.Uint64ToLittleEndianBytes(rn.Nonce)...)
+	hashX := utils.Uint64ToLittleEndianBytes(rn.Nonce)
+	hashX = append(hashX, rn.Kern...)
 	hashX = append(hashX, rn.Timestamp...)
-	recheck_hash := [32]byte(ep.HashCipher.CalculateHash(hashX))
-	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash[:], rn.Hasher[:])
+	recheck_hash := ep.HashCipher.CalculateHash(hashX)
+	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash, rn.Hasher)
 	if !status {
 		ep.Client.CloseAll()
 		return errors.New(protocol.P_PREFIX + protocol.BILATERY_HASH_ACK_FAILURE + descript)
@@ -391,19 +395,21 @@ func (ep *EncFlowProxy) writeResponse(proxy_client_handshake *protocol.HandShake
 		return errors.New(protocol.FAILED_TO_VALIDATE_RN)
 	}
 	tmpKey := protocol.GenerateSessionKey(
-		[32]byte(ep.StreamCipher.GetKey()),
+		[]byte(ep.StreamCipher.GetKey()),
 		ep.rpk.Kern,
 		ep.rpk.Nonce,
 		proxy_client_handshake.Nonce,
+		ep.StreamCipher,
 		ep.HashCipher,
 	)
-	ep.StreamCipher.SetKey(tmpKey[:])
+	ep.StreamCipher.SetKey(tmpKey)
 
-	// TOFIX: localhost will fail if not sleeping here
+	// TOFIX: localhost will fail if proxy not sleep here
 	time.Sleep(time.Microsecond)
 
-	cnt, err := ep.EncWrite2Client(ep.rpk.Kern[:])
-	if err != nil || cnt != uint(len(ep.rpk.Kern)) {
+	cnt, err := ep.EncWrite2Client(ep.rpk.Kern)
+	currLen := uint64(len(ep.rpk.Kern)) + ep.StreamCipher.WithIvAttached()
+	if err != nil || uint64(cnt) != currLen {
 		ep.Client.CloseAll()
 		return err
 	}
@@ -411,12 +417,15 @@ func (ep *EncFlowProxy) writeResponse(proxy_client_handshake *protocol.HandShake
 }
 
 func (ep *EncFlowProxy) readFinish() error {
-	_finish, cnt, err := ep.DecReadViaClient()
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
-		err != nil {
+	mission_failed := func() {
 		ep.rSignal <- false
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(protocol.P_PREFIX+protocol.BILATERY_ACK_FINISHED_FAILURE, err)
+	}
+	_finish, cnt, err := ep.DecReadViaClient()
+	currLen := protocol.SafeGainTimestampHashLen() + ep.StreamCipher.WithIvAttached()
+	if uint64(cnt) != currLen || err != nil {
+		mission_failed()
+		return defErr.StrConcat(protocol.P_PREFIX+protocol.BILATERY_ACK_FINISHED_FAILURE, err)
 	}
 	if !protocol.AckFlowValidation(
 		ep.HashCipher,
@@ -426,8 +435,7 @@ func (ep *EncFlowProxy) readFinish() error {
 		&ep.ackRec,
 		ep.pingRef,
 		false) {
-		ep.rSignal <- false
-		ep.Client.CloseAll()
+		mission_failed()
 		return errors.New(protocol.P_PREFIX + protocol.BILATERY_ACK_FINISHED_FAILURE)
 	}
 	ep.rSignal <- true
@@ -437,10 +445,10 @@ func (ep *EncFlowProxy) readFinish() error {
 func (ep *EncFlowProxy) writeFinish() error {
 	curr, res := protocol.AckToTimestampHash(ep.HashCipher, []byte(protocol.HANDHLT))
 	cnt, err := ep.EncWrite2Client(append(curr, res...))
-	if uint64(cnt) != protocol.TIME_LEN.SafeReadTimeLen()+protocol.CHOPPING_LENGTH_OF_HASH_VAL ||
-		err != nil {
+	currLen := protocol.SafeGainTimestampHashLen() + ep.StreamCipher.WithIvAttached()
+	if uint64(cnt) != currLen || err != nil {
 		ep.Client.CloseAll()
-		return defErr.DescribeThenConcat(
+		return defErr.StrConcat(
 			protocol.P_PREFIX+protocol.BILATERY_FINISHED_FAILURE,
 			err)
 	}
@@ -482,7 +490,7 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 		return
 	}
 
-	// TODO: can here resist DDos?
+	// TODO: can callee here here resist DDos?
 	werr = ep.writeStep3(2) // ack cflow2
 	if werr != nil {
 		return
@@ -506,7 +514,7 @@ func (ep *EncFlowProxy) shakeHandWriteCoroutine() (werr error) {
 		return
 	}
 
-	// TODO: can such command below have the ability to resist DDos?
+	// TODO: can callee below have the ability to resist DDos?
 	werr = ep.writeFinish()
 	return
 }
@@ -571,9 +579,14 @@ func (ep *EncFlowProxy) clientAddrSpliter() (string, string) {
 	return domain[:pos], domain[pos:]
 }
 
+/*
+ * todo: `ping` is not the final silver bullet for network connectivity due to several ineluctable issues.
+ * 		we need other protocols to dress up as pingers or resolve conflicts on current spot.
+ * 		Model-Free Adaptive Predictive Control... ?
+ */
 func (ep *EncFlowProxy) Shakehand() (werr error, rerr error) {
 	ip, _ := ep.clientAddrSpliter()
-	ping_ref, ok := service.PingWithoutPrint(ip, 3, 5, 5)
+	ping_ref, ok := service.PingWithoutPrint(ip, 3, 4, 5, 5)
 	if !ok {
 		werr = errors.New(protocol.BILATERY_FAILED_TO_PING)
 		rerr = errors.New(protocol.BILATERY_FAILED_TO_PING)
@@ -586,10 +599,8 @@ func (ep *EncFlowProxy) Shakehand() (werr error, rerr error) {
 	}
 	functor()
 	defer functor()
-	defer close(wch)
-	defer close(rch)
-	go func() { rch <- ep.shakeHandReadCoroutine() }()
-	go func() { wch <- ep.shakeHandWriteCoroutine() }()
+	go func() { rch <- ep.shakeHandReadCoroutine(); close(rch) }()
+	go func() { wch <- ep.shakeHandWriteCoroutine(); close(wch) }()
 	werr, rerr = <-wch, <-rch
 	// TODO: reset (pri, pub) keypair.
 	return

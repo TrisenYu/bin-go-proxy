@@ -14,22 +14,19 @@ type AsymmCipher interface {
 	*/
 	SetPub(args ...interface{}) error
 
-	// copy pub instance in memory to []byte
+	// copy pub instance in memory to []byte.
 	GetPub(res *[]byte)
 
-	/*
-		Encrypt msg by pub and then return the result.
-		if encryption failed, recommand directly `panic`.
-	*/
+	// Encrypt message by pubKey and then return the result and possible error.
 	PubEncrypt(msg []byte) ([]byte, error)
 
-	// return length of pub-key.
+	// return the length of pub-key.
 	GetPubLen() uint64
 
-	/*
-		Decrypt msg by pri and then return the result.
-		if decryption failed, recommand directly `panic`.
-	*/
+	// return the length of signature
+	GetSignatureLen() uint64
+
+	// Decrypt message by priKey and then return the result and possible error.
 	PemDecrypt(msg []byte) ([]byte, error)
 
 	// sign with prikey. error provided for subsequently utilization.
@@ -40,14 +37,26 @@ type AsymmCipher interface {
 }
 
 type StreamCipher interface {
-	// SetKey from bytes
+	// SetKey from bytes.
 	SetKey(key []byte)
 
-	// SetIV from bytes
+	// SetIV from bytes.
 	SetIv(iv []byte)
 
-	// return the key in the representation of bytes
+	// return the key in the representation of bytes.
 	GetKey() []byte
+
+	// return the length of key.
+	GetKeyLen() uint64
+
+	// return the length of iv.
+	GetIvLen() uint64
+
+	// return the length of key and iv.
+	GetKeyIvLen() uint64
+
+	// return 0 if IV does not need attaching to the preamble of one datagram.
+	WithIvAttached() uint64
 
 	// encrypt message and output without IV.
 	EncryptFlow(msg []byte) ([]byte, error)
@@ -57,7 +66,8 @@ type StreamCipher interface {
 }
 
 type HashCipher interface {
-	CalculateHash(msg []byte) []byte // not for file
+	GetHashLen() uint64              // return the length of hash.
+	CalculateHash(msg []byte) []byte // .not for file.
 }
 
 type CompOption interface {
@@ -74,13 +84,13 @@ type CompOption interface {
 	DecompressMsg(msg []byte) ([]byte, error)
 }
 
-func GeneratePresessionKey() ([]byte, []byte, error) {
-	key := make([]byte, KeySize)
+func GeneratePresessionKey(currCipher StreamCipher) ([]byte, []byte, error) {
+	key := make([]byte, currCipher.GetKeyLen())
 	if _, err := rand.Read(key); err != nil {
 		return nil, nil, err
 	}
 
-	iv := make([]byte, IVSize)
+	iv := make([]byte, currCipher.GetIvLen())
 	if _, err := rand.Read(iv); err != nil {
 		return nil, nil, err
 	}

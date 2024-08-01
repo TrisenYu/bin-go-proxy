@@ -13,7 +13,7 @@ func (z *Zlib) InitCompresser() error {
 	return nil
 }
 
-// todo: lengthy after compression
+// todo: lengthy bytes after compression
 func (z *Zlib) InitDecompresser() error {
 	return nil
 }

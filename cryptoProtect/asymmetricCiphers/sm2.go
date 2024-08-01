@@ -1,6 +1,6 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package cryptoprotect
+package asymmetricciphers
 
 import (
 	"crypto/ecdsa"
@@ -43,6 +43,7 @@ func pubBytesToKey(pubStr []byte) *ecdsa.PublicKey {
 }
 
 type SM2 struct {
+	Len uint64
 	pri *sm2.PrivateKey
 	pub *ecdsa.PublicKey
 }
@@ -76,6 +77,10 @@ func (_sm2 *SM2) GenerateKeyPair() {
 	_sm2.pri, _sm2.pub = pem, &pem.PublicKey
 }
 
+func (_sm2 *SM2) GetSignatureLen() uint64 {
+	return 64
+}
+
 func (_sm2 *SM2) PubEncrypt(msg []byte) ([]byte, error) {
 	enc, err := sm2.Encrypt(rand.Reader, _sm2.pub, msg, sm2.ASN1EncrypterOpts)
 	return enc, err
@@ -95,11 +100,11 @@ func (_sm2 *SM2) PemSign(msg []byte) ([]byte, error) {
 
 func (_sm2 *SM2) PubVerify(msg []byte, signature []byte) bool {
 	r, s := new(big.Int), new(big.Int)
-	if len(signature) != SignSize {
+	if len(signature) != 64 {
 		return false
 	}
-	r.SetBytes(signature[:SignSize/2])
-	s.SetBytes(signature[SignSize/2:])
+	r.SetBytes(signature[:32])
+	s.SetBytes(signature[32:])
 	return sm2.VerifyWithSM2(_sm2.pub, []byte{}, msg, r, s)
 }
 

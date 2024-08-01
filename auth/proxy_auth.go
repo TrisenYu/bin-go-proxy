@@ -90,5 +90,5 @@ func init() {
 		log.Println(err)
 		return
 	}
-	log.Println(`accessToken is ` + string(res))
+	log.Println(`accessToken is "` + string(res) + `"`)
 }

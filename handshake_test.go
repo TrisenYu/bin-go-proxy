@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,8 +23,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 	)
 	c.InitChannel()
 	ep.InitChannel()
-	defer c.DeleteChannel()
-	defer ep.DeleteChannel()
+
 	log.Println(`we will begin client-proxy shakehand test.`)
 
 	cp_con, pc_con := make(chan net.Conn, 1), make(chan net.Conn, 1)
@@ -33,7 +33,7 @@ func TestHandShakeInTCP6(t *testing.T) {
 		time.Sleep(time.Second)
 		dialer, err := net.Dial("tcp6", "[::1]:9971")
 		if err != nil || dialer == nil {
-			err = defErr.Concat(err, `dialer may be hazard`)
+			err = defErr.ConcatStr(err, `dialer may be hazard`)
 			t.Error(err.Error())
 			return
 		}
@@ -76,35 +76,42 @@ func TestHandShakeInTCP6(t *testing.T) {
 		defer close(server_done)
 		if pwerr != nil {
 			server_done <- false
+			ep.DeleteChannel()
 			t.Errorf(pwerr.Error())
 			return
 		}
 		if prerr != nil {
 			server_done <- false
+			ep.DeleteChannel()
 			t.Errorf(prerr.Error())
 			return
 		}
 		server_done <- true
+		ep.DeleteChannel()
 	}()
 	go func() {
 		cwerr, crerr := c.Shakehand()
 		defer close(client_done)
 		if cwerr != nil {
 			client_done <- false
+			c.DeleteChannel()
 			t.Errorf(cwerr.Error())
 			return
 		}
 		if crerr != nil {
 			client_done <- false
+			c.DeleteChannel()
 			t.Errorf(crerr.Error())
 			return
 		}
 		client_done <- true
+		c.DeleteChannel()
 	}()
 	jup, juc := <-server_done, <-client_done
 	if jup && juc {
 		log.Println(`key:`, hex.EncodeToString(c.StreamCipher.GetKey()))
 		log.Println(`epKey:`, hex.EncodeToString(ep.StreamCipher.GetKey()))
+		log.Println(reflect.TypeOf(c.StreamCipher).Elem().Name())
 	} else {
 		t.Error(`Unaccepted`)
 		return

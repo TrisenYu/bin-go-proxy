@@ -8,7 +8,6 @@ import (
 	"net"
 	"time"
 
-	cryptoprotect "bingoproxy/cryptoProtect"
 	defErr "bingoproxy/defErr"
 	protocol "bingoproxy/protocol"
 	utils "bingoproxy/utils"
@@ -57,16 +56,16 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 	switch string(payload[:protocol.CMD_PAYLOAD_LEN]) {
 	/* change sessionkey. Abort connection once unable to maintain encrypted connection.*/
 	case protocol.CMD_refresh_sessionkey:
-		if len(payload[protocol.CMD_PAYLOAD_LEN:]) != cryptoprotect.KeySize+cryptoprotect.IVSize {
+		if uint64(len(payload[protocol.CMD_PAYLOAD_LEN:])) != ep.KeyLen+ep.IvLen {
 			return errors.New(`fatal error: malicious payload for altering key-iv`)
 		}
-		key_ed := protocol.CMD_PAYLOAD_LEN + uint(cryptoprotect.KeySize)
-		iv_ed := key_ed + uint(cryptoprotect.IVSize)
+		key_ed := protocol.CMD_PAYLOAD_LEN + uint(ep.KeyLen)
+		iv_ed := key_ed + uint(ep.IvLen)
 		ep.StreamCipher.SetKey(payload[protocol.CMD_PAYLOAD_LEN:key_ed])
 		ep.StreamCipher.SetIv(payload[key_ed:iv_ed])
 		_, err := ep.EncWrite2Client([]byte(protocol.HANDHLT))
 		if err != nil {
-			return defErr.DescribeThenConcat(`fatal error:`, err)
+			return defErr.StrConcat(`fatal error:`, err)
 		}
 		return errors.New(`info: jump out`)
 
@@ -91,15 +90,15 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 		}
 		/*
 			TODO: avoid self-looping by certain algorithm.
-				.-> . -> .
-					^    |
-					|    v
-					. <- .
+			    .-> . -> .
+			        ^    |
+			        |    v
+			        . <- .
 			What is the final solution ?
 		*/
 		_, err := ep.EncWrite2Client([]byte(protocol.RESP_recv_server_addrp)) // send ≠ acknowledge
 		if err != nil {
-			return defErr.DescribeThenConcat(`fatal error:`, err)
+			return defErr.StrConcat(`fatal error:`, err)
 		}
 		ep.remote_info = &res
 		return errors.New(`info: need jump out`)
@@ -114,17 +113,17 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 		if err == nil {
 			_, err = ep.EncWrite2Client([]byte(protocol.RESP_server_acknowlege))
 			if err != nil {
-				return defErr.DescribeThenConcat(`fatal error:`, err)
+				return defErr.StrConcat(`fatal error:`, err)
 			}
 			return nil
 		}
 		/* unable to connect to remote server */
 		_, err1 := ep.EncWrite2Client([]byte(protocol.RESP_fail2_conn2server))
 		if err1 != nil {
-			return defErr.DescribeThenConcat(`fatal error:`, err1)
+			return defErr.StrConcat(`fatal error:`, err1)
 		}
 		ep.remote_info = nil // clean if invalid
-		return defErr.DescribeThenConcat(`remote connection failed error:`, err)
+		return defErr.StrConcat(`remote connection failed error:`, err)
 
 	}
 	return errors.New(`unsupported control type`)
@@ -163,7 +162,7 @@ command is in the shape of
 func (ep *EncFlowProxy) CmdParser() error {
 	packet, cnt, err := ep.DecReadViaClient()
 	if err != nil || cnt < 30 /* 6+24 */ {
-		return defErr.DescribeThenConcat(`unexpected error: failed to dec-read from client or fake packet caused by`, err)
+		return defErr.StrConcat(`unexpected error: failed to dec-read from client or fake packet caused by`, err)
 	}
 	attr, ver := packet[0], packet[1]
 	nxt_len := utils.LittleEndianBytesToUint32([4]byte(packet[2:6]))

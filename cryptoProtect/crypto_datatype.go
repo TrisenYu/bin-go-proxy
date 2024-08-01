@@ -19,40 +19,33 @@ type (
 )
 
 const (
-	IVSize   int                      = 16
-	KeySize  int                      = 32
-	HashSize int                      = KeySize
-	SignSize int                      = 64
-	PICK_SM2 asymmetric_cipher_choice = iota - 3
-	// TODO: Lattice encryption.
+	// TODO: Lattice encryption embedding to asymmetric cipher suite.
+	PICK_SM2                  asymmetric_cipher_choice = iota + 1  // sm2 asymmetric cipher
+	PICK_ZUC                  stream_cipher_choice     = iota - 1  // zuc stream cipher
+	PICK_SALSA20                                                   // salsa20 stream cipher
+	PICK_AES_OFB_256                                               // aes-output-feedback-256 cipher
+	PICK_AES_CTR_256                                               // aes-couter-mode-256 cipher
+	PICK_AES_GCM_256                                               // aes-galois-counter-mode cipher
+	PICK_SM4_OFB_128                                               // sm4-output-feedback-256 cipher
+	PICK_SM4_CTR_128                                               // sm4-couter-mode-256 cipher
+	PICK_SM4_GCM_128                                               // sm4-galois-counter-mode cipher
+	PICK_CHACHA20POLY1305_256                                      // chacha20-poly1305 cipher
+	PICK_SM3                  hash_cipher_choice       = iota - 9  // sm3 hash
+	PICK_SHA256                                                    // sha256
+	PICK_SHA3_256                                                  // sha3-256
+	PICK_SHA384                                                    // sha384
+	PICK_SHA3_384                                                  // sha3-384
+	PICK_SHA512                                                    // sha384
+	PICK_SHA3_512                                                  // sha3-384
+	PICK_BLAKE2B256                                                // blake2b256
+	PICK_BLAKE2S256                                                // blake2s56
+	PICK_BLAKE2B384                                                // blake2b256
+	PICK_BLAKE2B512                                                // blake2b256
+	PICK_NULL_COMP            compressed_choice        = iota - 20 // no need for compression algorithm
+	PICK_ZLIB_COMP                                                 // zlib compression
 )
 
-const (
-	PICK_ZUC                  stream_cipher_choice = iota + 1 // zuc stream cipher
-	PICK_SALSA20                                              // salsa20 stream cipher
-	PICK_AES_OFB_256                                          // aes-output-feedback-256 cipher
-	PICK_AES_CTR_256                                          // aes-couter-mode-256 cipher
-	PICK_AES_GCM_256                                          // aes-galois-counter-mode cipher
-	PICK_SM4_OFB_256                                          // sm4-output-feedback-256 cipher
-	PICK_SM4_CTR_256                                          // sm4-couter-mode-256 cipher
-	PICK_SM4_GCM_256                                          // sm4-galois-counter-mode cipher
-	PICK_CHACHA20POLY1305_256                                 // chacha20-poly1305 cipher
-)
-
-const (
-	PICK_SM3        hash_cipher_choice = iota + 1 // sm3 hash
-	PICK_SHA256                                   // sha256
-	PICK_SHA3_256                                 // sha3-256
-	PICK_BLAKE2B256                               // blake2b256
-	PICK_BLAKE2S256                               // blake2s56
-)
-
-const (
-	PICK_NULL_COMP compressed_choice = iota + 1 // no need for compression algorithm
-	PICK_ZLIB_COMP                              // zlib compression
-)
-
-var S_Box = [...]byte{
+var AESBox = [...]byte{
 	0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
 	0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
 	0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D, 0x8B, 0xD1, 0x25,

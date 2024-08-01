@@ -120,7 +120,7 @@ func CheckConnectionByPing(dst_ip string, cnt uint16) (int64, bool) {
 // return: average RTT(us) and the reachability(true for accessable)
 func PingWithoutPrint(
 	dst_ip string,
-	cnt uint16,
+	cnt, lena uint16,
 	conn_timeout_sec, pong_timeout_sec uint,
 ) (int64, bool) {
 	switch dst_ip {
@@ -153,7 +153,7 @@ func PingWithoutPrint(
 	for i = 0; i < cnt; i++ {
 		icmp := &icmpPacket{Type: 8, Code: 0, CheckSum: 0, ID: i, Seq: i}
 		binary.Write(&buff, binary.BigEndian, icmp)
-		payload := []byte(utils.GenerateEnterableRandomString(16))
+		payload := []byte(utils.GenerateEnterableRandomString(int64(lena)))
 		buff.Write(payload)
 		payload = buff.Bytes()
 		buff.Reset()

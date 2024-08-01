@@ -30,9 +30,10 @@ type EncFlowProxy struct {
 	rSignal    chan bool
 
 	// check for timestamp
-	ackTimCheck *[8][]byte
-	pingRef     int64
-	ackRec      int
+	ackTimCheck   *[8][]byte
+	pingRef       int64
+	ackRec        int
+	KeyLen, IvLen uint64
 }
 
 func (p *EncFlowProxy) InitChannel() {
@@ -52,11 +53,11 @@ func (p *EncFlowProxy) SendPub() error {
 	var res_err error
 	k, err := p.CompOption.CompressMsg(key)
 	if err != nil {
-		res_err = defErr.DescribeThenConcat(`compression failed`, err)
+		res_err = defErr.StrConcat(`compression failed`, err)
 	}
 	cnt, err := p.Client.Write(k)
 	if cnt != uint(len(k)) || err != nil {
-		res_err = defErr.DescribeThenConcat(`sending interrupts `+err.Error()+`--`, err)
+		res_err = defErr.StrConcat(`sending interrupts `+err.Error()+`--`, err)
 	}
 	return res_err
 }
@@ -72,7 +73,7 @@ func (ep *EncFlowProxy) EncWrite2Client(plaintext []byte) (uint, error) {
 
 func (ep *EncFlowProxy) DecReadViaClient() ([]byte, uint, error) {
 	enc, cnt, err := ep.Client.Read()
-	if cnt == 0 || err != nil {
+	if cnt <= 0 || err != nil {
 		return []byte{}, 0, errors.Join(err, errors.New(`got empty enc-string from client`))
 	}
 	dec, err := ep.StreamCipher.DecryptFlow(enc)

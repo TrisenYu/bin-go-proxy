@@ -58,11 +58,11 @@ const (
 )
 
 type HandShakeMsg struct {
-	Kern      [cryptoprotect.KeySize + cryptoprotect.IVSize]byte // login-proxy: key-iv client <- rn  48 bytes
-	Nonce     uint64                                             // random-nonce                       8 bytes
-	Hasher    [cryptoprotect.HashSize]byte                       // hash of concat(kern, nonce)       32 bytes
-	Signature [cryptoprotect.SignSize]byte                       // signature of hash                 64 bytes
-	Timestamp []byte                                             // timestamp
+	Nonce     uint64 // random-nonce                      8 bytes
+	Kern      []byte // login-proxy: key-iv client <- rn  ? bytes
+	Hasher    []byte // hash of concat(kern, nonce)       ? bytes
+	Signature []byte // signature of hash                 ? bytes
+	Timestamp []byte // timestamp
 }
 
 /*
@@ -75,25 +75,32 @@ the way of mapping:
 	2 and then operate pressionkey with sbox => hash as key
 */
 func GenerateSessionKey(
-	prekey [cryptoprotect.KeySize]byte,
-	rn [cryptoprotect.KeySize + cryptoprotect.IVSize]byte,
+	prekey []byte,
+	rn []byte,
 	cnonce, pnonce uint64,
+	stream_obj cryptoprotect.StreamCipher,
 	hash_obj cryptoprotect.HashCipher,
-) [cryptoprotect.KeySize]byte {
-	key := make([]byte, cryptoprotect.KeySize)
-	keySize := cryptoprotect.KeySize
-	for i := 0; i < keySize; i += 4 {
+) []byte {
+	keySize := stream_obj.GetKeyLen()
+	key := make([]byte, keySize)
+
+	var i uint64 = 0
+	for ; i < keySize; i += 4 {
 		shift, flag := i>>2, (i>>3) == 1
-		if flag {
-			key[i] = prekey[i] ^ byte(pnonce>>uint64(shift<<3))
-		} else {
-			key[i] = prekey[i] ^ byte(cnonce>>uint64(shift<<3))
+		var choice uint64
+		switch flag {
+		case true:
+			choice = pnonce >> uint64(shift<<3)
+		default:
+			choice = cnonce >> uint64(shift<<3)
 		}
+		key[i] = prekey[i] ^ byte(choice)
 	}
-	for i := 0; i < keySize; i++ {
-		key[i] = (key[i] + cryptoprotect.S_Box[key[i]] + cryptoprotect.S_Box[key[(i-1+keySize)%keySize]]) & 0xFF
+	for i = 0; i < keySize; i++ {
+		key[i] = byte(key[i] + cryptoprotect.AESBox[key[i]] + cryptoprotect.AESBox[key[(i-1+keySize)%keySize]])
 	}
-	return [32]byte(hash_obj.CalculateHash(key))
+
+	return []byte(hash_obj.CalculateHash(key))
 }
 
 func GenerateRandUint64WithByteRepresentation() (uint64, []byte, error) {

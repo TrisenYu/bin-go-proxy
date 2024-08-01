@@ -37,6 +37,8 @@ type Client struct {
 	ackTimCheck *[8][]byte
 	pingRef     int64
 	ackRec      int
+
+	KeyLen, IvLen uint64
 }
 
 func (ef *ExitFlag) SafeReadState() bool {
@@ -86,8 +88,8 @@ func (c *Client) EncWrite(plaintext []byte) (uint, error) {
 
 func (c *Client) DecRead() ([]byte, uint, error) {
 	enc, cnt, err := c.MiProxy.Read()
-	if cnt == 0 || err != nil {
-		return []byte{}, 0, defErr.Concat(err, `or read empty enc-bytes`)
+	if cnt <= 0 || err != nil {
+		return []byte{}, 0, defErr.ConcatStr(err, `or read empty enc-bytes`)
 	}
 	dec, err := c.StreamCipher.DecryptFlow(enc)
 	return dec, cnt, err
@@ -100,11 +102,11 @@ func (c *Client) sendPub() error {
 	var res_err error
 	k, err := c.CompOption.CompressMsg(key)
 	if err != nil {
-		res_err = defErr.DescribeThenConcat(`compression failed`, err)
+		res_err = defErr.StrConcat(`compression failed`, err)
 	}
 	cnt, err := c.MiProxy.Write(k)
 	if uint64(cnt) != key_len {
-		res_err = defErr.DescribeThenConcat(`client sending failure`+err.Error()+`--`, res_err)
+		res_err = defErr.StrConcat(`client sending failure`+err.Error()+`--`, res_err)
 	}
 	return res_err
 }

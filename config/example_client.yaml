@@ -5,8 +5,8 @@ local:
   InterceptorPort: 53197
   ProxySocket: "[::1]:9971"
   AsymmetricCipher: "sm2"
-  StreamCipher: "zuc"
-  HashCipher: "sha256"
+  StreamCipher: "chacha20poly1305"
+  HashCipher: "sha512"
   CompressedAlgorithm: "null"
-  AccessToken: "56e0daatriei6o5i" # should save in file called `./.accessToken.txt`  located in father dir.
+  AccessToken: "56e0daatriei6o5i" # should save in a file called `./.accessToken.txt` located in father dir.
   
