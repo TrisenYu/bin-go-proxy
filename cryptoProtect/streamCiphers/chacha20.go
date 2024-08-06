@@ -8,9 +8,15 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+const (
+	chacha20polyKeyLen        = 32
+	chacha20polyIvLen         = 24
+	chacha20polyExtAttachedIv = 16
+)
+
 type Chacha20poly1305 struct {
-	Key                  [32]byte
-	Iv                   [24]byte
+	Key                  [chacha20polyKeyLen]byte
+	Iv, iv               [chacha20polyIvLen]byte
 	encStream, decStream cipher.AEAD
 }
 
@@ -22,12 +28,20 @@ func (c *Chacha20poly1305) generateAead(aead *cipher.AEAD) (err error) {
 	return err
 }
 
+func (c *Chacha20poly1305) ivRotate(inp *[chacha20polyIvLen]byte) {
+	lena := chacha20polyIvLen
+	for i := 0; i < lena; i++ {
+		(*inp)[i] = (GaloisBox[(*inp)[(i+lena-1)%lena]] + (*inp)[i]) & 0xFF
+	}
+}
+
 func (c *Chacha20poly1305) EncryptFlow(msg []byte) ([]byte, error) {
 	err := c.generateAead(&c.encStream)
 	if err != nil {
 		return nil, err
 	}
-	res := c.encStream.Seal(nil, c.Iv[:], msg, nil)
+	res := c.encStream.Seal(nil, c.Iv[:], msg, c.Key[:])
+	c.ivRotate(&c.Iv)
 	return res, nil
 }
 
@@ -36,45 +50,25 @@ func (c *Chacha20poly1305) DecryptFlow(msg []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.decStream.Open(nil, c.Iv[:], msg, nil)
+	res, err := c.decStream.Open(nil, c.iv[:], msg, c.Key[:])
 	if err != nil {
 		return nil, err
 	}
+	c.ivRotate(&c.iv)
 	return res, nil
 }
 
 func (c *Chacha20poly1305) SetKey(key []byte) {
-	c.Key = [32]byte(key)
+	c.Key = [chacha20polyKeyLen]byte(key)
 	c.encStream, c.decStream = nil, nil
 }
 
 func (c *Chacha20poly1305) SetIv(iv []byte) {
-	c.Iv = [24]byte(iv)
+	c.Iv = [chacha20polyIvLen]byte(iv)
+	copy(c.iv[:], c.Iv[:])
 }
-
-func (c *Chacha20poly1305) GetKey() []byte {
-	return c.Key[:]
-}
-
-func (c *Chacha20poly1305) GetIv() []byte {
-	return c.Iv[:]
-}
-
-// return the length of key.
-func (c *Chacha20poly1305) GetKeyLen() uint64 {
-	return 32
-}
-
-// return the length of iv.
-func (c *Chacha20poly1305) GetIvLen() uint64 {
-	return 24
-}
-
-func (c *Chacha20poly1305) GetKeyIvLen() uint64 {
-	return 56
-}
-
-// return 0 if IV does not need attaching to the preamble of one datagram.
-func (c *Chacha20poly1305) WithIvAttached() uint64 {
-	return 16
-}
+func (c *Chacha20poly1305) GetKey() []byte         { return c.Key[:] }
+func (c *Chacha20poly1305) GetKeyLen() uint64      { return chacha20polyKeyLen }
+func (c *Chacha20poly1305) GetIvLen() uint64       { return chacha20polyIvLen }
+func (c *Chacha20poly1305) GetKeyIvLen() uint64    { return chacha20polyKeyLen + chacha20polyIvLen }
+func (c *Chacha20poly1305) WithIvAttached() uint64 { return chacha20polyExtAttachedIv }

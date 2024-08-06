@@ -43,7 +43,6 @@ func pubBytesToKey(pubStr []byte) *ecdsa.PublicKey {
 }
 
 type SM2 struct {
-	Len uint64
 	pri *sm2.PrivateKey
 	pub *ecdsa.PublicKey
 }

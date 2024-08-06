@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"bingoproxy/utils"
+	utils "bingoproxy/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -54,8 +54,8 @@ func ParseClientYAML(path string) *ClientCommunicationConfig {
 	return GlobalClientConfiguration
 }
 
+// we provide a default configuration, user can reset the configuratoin after initiation.
 func init() {
-	// we provide a default configuration, user can reset the configuratoin after initiation.'
 	grandfa_dir, err := utils.GetFilePath(default_client_path)
 	if err != nil {
 		return // keep nil.

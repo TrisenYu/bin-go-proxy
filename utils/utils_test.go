@@ -9,29 +9,29 @@ import (
 
 func TestSplitByteArr(t *testing.T) {
 	{
-		_l, _h := BytesSpliterInHalfChanceField([]byte{})
+		_l, _h := BytesSplitInHalfChanceField([]byte{})
 		log.Println(_l, _h)
 	}
 	{
-		_l, _h := BytesSpliterInHalfChanceField([]byte{0x1})
+		_l, _h := BytesSplitInHalfChanceField([]byte{0x1})
 		log.Println(_l, _h)
 	}
 	{
-		_l, _h := BytesSpliterInHalfChanceField([]byte{0x10, 0x20, 0x30})
+		_l, _h := BytesSplitInHalfChanceField([]byte{0x10, 0x20, 0x30})
 		log.Println(_l, _h)
 	}
 	{
-		_l, _h := BytesSpliterInHalfChanceField([]byte{0x20, 0x30, 0xFF, 0x33, 0xAb})
+		_l, _h := BytesSplitInHalfChanceField([]byte{0x20, 0x30, 0xFF, 0x33, 0xAb})
 		log.Println(_l, _h)
 	}
 	{
 		pwne := []byte(GenerateEnterableRandomString(2048))
-		_l, _h := BytesSpliterInHalfChanceField(pwne)
+		_l, _h := BytesSplitInHalfChanceField(pwne)
 		log.Println(len(_l), len(_h))
 	}
 	{
 		pwnf := []byte(GenerateEnterableRandomString(4097))
-		_l, _h := BytesSpliterInHalfChanceField(pwnf)
+		_l, _h := BytesSplitInHalfChanceField(pwnf)
 		log.Println(len(_l), len(_h))
 	}
 }

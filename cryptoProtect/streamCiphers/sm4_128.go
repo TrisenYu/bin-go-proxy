@@ -29,7 +29,7 @@ type (
 	}
 	SM4_GCM struct {
 		Key       [sm4KeySize]byte
-		Iv        [sm4GCMIvSize]byte
+		Iv, iv    [sm4GCMIvSize]byte
 		encStream cipher.AEAD
 		decStream cipher.AEAD
 	}
@@ -51,12 +51,20 @@ func (s *SM4_GCM) generateStream(aead *cipher.AEAD) error {
 }
 
 /* GCM */
+func (s *SM4_GCM) ivRotate(inp *[sm4GCMIvSize]byte) {
+	lena := sm4GCMIvSize
+	for i := 0; i < lena; i++ {
+		(*inp)[i] = (GaloisBox[(*inp)[(i+lena-1)%lena]] + (*inp)[i]) & 0xFF
+	}
+}
+
 func (s *SM4_GCM) EncryptFlow(msg []byte) ([]byte, error) {
 	err := s.generateStream(&s.encStream)
 	if err != nil {
 		return nil, err
 	}
-	xor_res := s.encStream.Seal(nil, s.Iv[:], msg, nil)
+	xor_res := s.encStream.Seal(nil, s.Iv[:], msg, s.Key[:])
+	s.ivRotate(&s.Iv)
 	return xor_res, nil
 }
 
@@ -65,10 +73,11 @@ func (s *SM4_GCM) DecryptFlow(msg []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	xor_res, err := s.decStream.Open(nil, s.Iv[:], msg, nil)
+	xor_res, err := s.decStream.Open(nil, s.iv[:], msg, s.Key[:])
 	if err != nil {
 		return nil, err
 	}
+	s.ivRotate(&s.iv)
 	return xor_res, nil
 }
 
@@ -77,9 +86,11 @@ func (s *SM4_GCM) SetKey(key []byte) {
 	s.encStream, s.decStream = nil, nil
 }
 
-func (s *SM4_GCM) SetIv(iv []byte)        { s.Iv = [sm4GCMIvSize]byte(iv) }
+func (s *SM4_GCM) SetIv(iv []byte) {
+	s.Iv = [sm4GCMIvSize]byte(iv)
+	copy(s.iv[:], s.Iv[:])
+}
 func (s *SM4_GCM) GetKey() []byte         { return s.Key[:] }
-func (s *SM4_GCM) GetIv() []byte          { return s.Iv[:] }
 func (s *SM4_GCM) GetKeyLen() uint64      { return sm4KeySize }
 func (s *SM4_GCM) GetIvLen() uint64       { return sm4GCMIvSize }
 func (s *SM4_GCM) GetKeyIvLen() uint64    { return sm4KeySize + sm4GCMIvSize }
@@ -94,7 +105,7 @@ func (s *SM4_OFB) generateStream(steam *cipher.Stream) error {
 	if err != nil {
 		return err
 	}
-	*steam = cipher.NewCTR(block, s.Iv[:])
+	*steam = cipher.NewOFB(block, s.Iv[:])
 	return nil
 }
 
@@ -121,7 +132,6 @@ func (s *SM4_OFB) DecryptFlow(msg []byte) ([]byte, error) {
 func (s *SM4_OFB) SetKey(key []byte)      { s.Key = [sm4KeySize]byte(key) }
 func (s *SM4_OFB) SetIv(iv []byte)        { s.Iv = [sm4IvSize]byte(iv) }
 func (s *SM4_OFB) GetKey() []byte         { return s.Key[:] }
-func (s *SM4_OFB) GetIv() []byte          { return s.Iv[:] }
 func (s *SM4_OFB) GetKeyLen() uint64      { return sm4KeySize }
 func (s *SM4_OFB) GetIvLen() uint64       { return sm4IvSize }
 func (s *SM4_OFB) GetKeyIvLen() uint64    { return sm4KeySize + sm4IvSize }
@@ -163,7 +173,6 @@ func (s *SM4_CTR) DecryptFlow(msg []byte) ([]byte, error) {
 func (s *SM4_CTR) SetKey(key []byte)      { s.Key = [sm4KeySize]byte(key) }
 func (s *SM4_CTR) SetIv(iv []byte)        { s.Iv = [sm4IvSize]byte(iv) }
 func (s *SM4_CTR) GetKey() []byte         { return s.Key[:] }
-func (s *SM4_CTR) GetIv() []byte          { return s.Iv[:] }
 func (s *SM4_CTR) GetKeyLen() uint64      { return sm4KeySize }
 func (s *SM4_CTR) GetIvLen() uint64       { return sm4IvSize }
 func (s *SM4_CTR) GetKeyIvLen() uint64    { return sm4KeySize + sm4IvSize }

@@ -3,7 +3,7 @@ package main
 import "log"
 
 const (
-	TunnelingVersion string = `v1.0.0`
+	GlobalVersion string = `v1.0.0`
 )
 
 func init() {

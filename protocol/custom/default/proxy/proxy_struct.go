@@ -1,6 +1,6 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package proxy
+package protocol
 
 import (
 	"errors"
@@ -8,42 +8,45 @@ import (
 
 	cryptoprotect "bingoproxy/cryptoProtect"
 	defErr "bingoproxy/defErr"
-	protocol "bingoproxy/protocol"
+	custom "bingoproxy/protocol/custom"
 	socket "bingoproxy/socket"
 )
+
+// TODO: add client that has been checked after handshake to certain chain/queue for 1-N servering situation...
 
 type EncFlowProxy struct {
 	ClientAsymmCipher cryptoprotect.AsymmCipher
 	AsymmCipher       cryptoprotect.AsymmCipher
+	KeyLen, IvLen     uint64
 	StreamCipher      cryptoprotect.StreamCipher
 	HashCipher        cryptoprotect.HashCipher
 	CompOption        cryptoprotect.CompOption
+	rpk               *custom.HandShakeMsg
 
-	Client socket.Socket
-	Remote socket.Socket
-
+	Client      socket.Socket
 	remote_info *ClientControlMsg
+	Remote      socket.Socket
 
 	// concurrency control
-	wNeedBytes chan []byte
-	rpk        *protocol.HandShakeMsg
+	wNeedBytes chan *[]byte
 	rSignal    chan bool
 
 	// check for timestamp
-	ackTimCheck   *[8][]byte
-	pingRef       int64
-	ackRec        int
-	KeyLen, IvLen uint64
+	ackTimCheck *[8][]byte
+	pingRef     int64
+	ackRec      int
 }
 
-func (p *EncFlowProxy) InitChannel() {
+func (p *EncFlowProxy) initChannel() {
 	p.rSignal = make(chan bool)
-	p.wNeedBytes = make(chan []byte)
+	p.wNeedBytes = make(chan *[]byte)
 }
 
-func (p *EncFlowProxy) DeleteChannel() {
+func (p *EncFlowProxy) deleteChannel() {
 	close(p.rSignal)
 	close(p.wNeedBytes)
+	p.rSignal = nil
+	p.wNeedBytes = nil
 }
 
 func (p *EncFlowProxy) SendPub() error {
@@ -74,7 +77,7 @@ func (ep *EncFlowProxy) EncWrite2Client(plaintext []byte) (uint, error) {
 func (ep *EncFlowProxy) DecReadViaClient() ([]byte, uint, error) {
 	enc, cnt, err := ep.Client.Read()
 	if cnt <= 0 || err != nil {
-		return []byte{}, 0, errors.Join(err, errors.New(`got empty enc-string from client`))
+		return nil, 0, errors.Join(err, errors.New(`got empty enc-string from client`))
 	}
 	dec, err := ep.StreamCipher.DecryptFlow(enc)
 	return dec, cnt, err

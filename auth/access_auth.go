@@ -14,11 +14,12 @@ import (
 const (
 	TokenLen     = 16
 	letters      = "qewr4560tyuiopadsfgh123jklzxcvbnmQWERTY789UIOPASDFGHJKLZCXVBNM"
-	ExpiringTime = 3 // TODO
+	ExpiringTime = 3 // TODO: flush access token after expiration.
 )
 
 var authMu sync.RWMutex
 
+// validate whether an provided string are equal to access token.
 func AuthValidation(remote_token []byte) (bool, string) {
 	buf, err := ReadAccessToken()
 	if err != nil {
@@ -27,16 +28,18 @@ func AuthValidation(remote_token []byte) (bool, string) {
 	if len(buf) == 0 {
 		return false, "Failed to authenticate due to empty token."
 	}
-	flag, reason := utils.CompareByteSliceEqualOrNot(buf, remote_token)
+	flag, reason := utils.CmpByte2Slices(buf, remote_token)
 	return flag, reason
 }
 
+// testify whether access token is generated to the file.
 func IsAcessTokenExisited() bool {
 	_, err := os.Lstat(config.GlobalProxyConfiguration.Local.PathToAccessToken)
 	return !os.IsNotExist(err)
 }
 
-func CreateAcessToken() {
+// create access token and store in a file. if failed, panic.
+func CreateAccessToken() {
 	if IsAcessTokenExisited() {
 		return
 	}
@@ -48,6 +51,7 @@ func CreateAcessToken() {
 	}
 }
 
+// read the access token from file. if failed, return nil and error.
 func ReadAccessToken() ([]byte, error) {
 	authMu.RLock()
 	res, err := os.ReadFile(config.GlobalProxyConfiguration.Local.PathToAccessToken)
@@ -58,6 +62,7 @@ func ReadAccessToken() ([]byte, error) {
 	return res, nil
 }
 
+// if failed, panic.
 func RemoveAccessFile() {
 	authMu.Lock()
 	err := os.Remove(config.GlobalProxyConfiguration.Local.PathToAccessToken)
@@ -68,6 +73,7 @@ func RemoveAccessFile() {
 	log.Println(`Access token has been removed.`)
 }
 
+// if failed to change, panic.
 func ChangeToken() string {
 	if !IsAcessTokenExisited() {
 		return ``
@@ -82,9 +88,10 @@ func ChangeToken() string {
 	return res
 }
 
+// generate access token and write it to log during initiation.
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	CreateAcessToken()
+	CreateAccessToken()
 	res, err := ReadAccessToken()
 	if err != nil {
 		log.Println(err)

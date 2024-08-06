@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	client "bingoproxy/client"
 	defErr "bingoproxy/defErr"
-	proxy "bingoproxy/proxy"
+	client "bingoproxy/protocol/custom/default/client"
+	proxy "bingoproxy/protocol/custom/default/proxy"
+	utils "bingoproxy/utils"
 )
 
 func TestHandShakeInTCP6(t *testing.T) {
@@ -21,8 +22,6 @@ func TestHandShakeInTCP6(t *testing.T) {
 		ep              proxy.EncFlowProxy
 		global_listener net.Listener
 	)
-	c.InitChannel()
-	ep.InitChannel()
 
 	log.Println(`we will begin client-proxy shakehand test.`)
 
@@ -71,49 +70,59 @@ func TestHandShakeInTCP6(t *testing.T) {
 
 	server_done, client_done := make(chan bool), make(chan bool)
 
+	type innerInterface interface {
+		Shakehand() (error, error)
+	}
+	foo := func(op *innerInterface, ch chan<- bool) {
+		defer close(ch)
+		werr, rerr := (*op).Shakehand()
+		if werr != nil {
+			ch <- false
+			log.Println(werr)
+			return
+		}
+		if rerr != nil {
+			ch <- false
+			log.Println(werr)
+			return
+		}
+		ch <- true
+	}
+
 	go func() {
-		pwerr, prerr := ep.Shakehand()
-		defer close(server_done)
-		if pwerr != nil {
-			server_done <- false
-			ep.DeleteChannel()
-			t.Errorf(pwerr.Error())
-			return
-		}
-		if prerr != nil {
-			server_done <- false
-			ep.DeleteChannel()
-			t.Errorf(prerr.Error())
-			return
-		}
-		server_done <- true
-		ep.DeleteChannel()
+		var tmp innerInterface = &ep
+		foo(&tmp, server_done)
 	}()
 	go func() {
-		cwerr, crerr := c.Shakehand()
-		defer close(client_done)
-		if cwerr != nil {
-			client_done <- false
-			c.DeleteChannel()
-			t.Errorf(cwerr.Error())
-			return
-		}
-		if crerr != nil {
-			client_done <- false
-			c.DeleteChannel()
-			t.Errorf(crerr.Error())
-			return
-		}
-		client_done <- true
-		c.DeleteChannel()
+		var tmp innerInterface = &c
+		foo(&tmp, client_done)
 	}()
 	jup, juc := <-server_done, <-client_done
-	if jup && juc {
-		log.Println(`key:`, hex.EncodeToString(c.StreamCipher.GetKey()))
-		log.Println(`epKey:`, hex.EncodeToString(ep.StreamCipher.GetKey()))
-		log.Println(reflect.TypeOf(c.StreamCipher).Elem().Name())
-	} else {
+	if !(jup && juc) {
 		t.Error(`Unaccepted`)
+		return
+	}
+	log.Println(`key:`, hex.EncodeToString(c.StreamCipher.GetKey()))
+	log.Println(`epKey:`, hex.EncodeToString(ep.StreamCipher.GetKey()))
+	log.Println(reflect.TypeOf(c.StreamCipher).Elem().Name())
+
+	helo := []byte(`hello world`)
+	rres1, err := c.StreamCipher.EncryptFlow(helo)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	rres2, err := ep.StreamCipher.DecryptFlow(rres1)
+	f, _ := utils.CmpByte2Slices(rres2, helo)
+	if err != nil || !f {
+		log.Println(rres2, helo)
+		t.Error(defErr.StrConcat(`decryption failed. potential error: `, err))
+		return
+	}
+	rres3, err := c.StreamCipher.EncryptFlow(helo)
+	f, _ = utils.CmpByte2Slices(rres3, rres1)
+	if err != nil || f {
+		t.Error(defErr.StrConcat(`counter or feedback stays the same...`, err))
 		return
 	}
 	log.Println(`End of HandShake Test`)

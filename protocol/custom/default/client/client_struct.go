@@ -1,80 +1,47 @@
-//go:build windows || linux
-// +build windows linux
-
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package client
+package protocol
 
 import (
-	"net"
-	"sync"
-
 	cryptoprotect "bingoproxy/cryptoProtect"
 	defErr "bingoproxy/defErr"
-	protocol "bingoproxy/protocol"
+	custom "bingoproxy/protocol/custom"
 	socket "bingoproxy/socket"
 )
-
-type ExitFlag struct {
-	ExitFlag bool          // new feature
-	RWLock   *sync.RWMutex // concurrency control
-}
 
 type Client struct {
 	MiProxy socket.Socket
 
 	ProxyAsymmCipher cryptoprotect.AsymmCipher
 	AsymmCipher      cryptoprotect.AsymmCipher
+	KeyLen, IvLen    uint64
 	StreamCipher     cryptoprotect.StreamCipher
 	HashCipher       cryptoprotect.HashCipher
 	CompOption       cryptoprotect.CompOption
 
-	wNeedBytes      chan []byte
+	wNeedBytes      chan *[]byte
 	rDoneSignal     chan bool
 	wNotifiedSignal chan bool
 
-	rn          *protocol.HandShakeMsg
+	rn          *custom.HandShakeMsg
 	ackTimCheck *[8][]byte
 	pingRef     int64
 	ackRec      int
-
-	KeyLen, IvLen uint64
 }
 
-func (ef *ExitFlag) SafeReadState() bool {
-	var res bool
-	ef.RWLock.RLock()
-	res = ef.ExitFlag
-	ef.RWLock.RUnlock()
-	return res
-}
-
-func (ef *ExitFlag) SafeFilpState() {
-	ef.RWLock.Lock()
-	if ef.ExitFlag {
-		ef.ExitFlag = false
-	} else {
-		ef.ExitFlag = true
-	}
-	ef.RWLock.Unlock()
-}
-
-var (
-	LocalInterceptor net.Listener // message source
-	LocalClient      Client       // might be used as local flow-proxy entity in the future
-	JudExitFlag      ExitFlag     = ExitFlag{ExitFlag: false, RWLock: new(sync.RWMutex)}
-)
-
-func (c *Client) InitChannel() {
+func (c *Client) initChannel() {
 	c.rDoneSignal = make(chan bool)
 	c.wNotifiedSignal = make(chan bool)
-	c.wNeedBytes = make(chan []byte)
+	c.wNeedBytes = make(chan *[]byte)
 }
 
 func (c *Client) DeleteChannel() {
 	close(c.rDoneSignal)
 	close(c.wNotifiedSignal)
 	close(c.wNeedBytes)
+	c.rDoneSignal = nil
+	c.wNotifiedSignal = nil
+	c.wNeedBytes = nil
 }
 
 func (c *Client) EncWrite(plaintext []byte) (uint, error) {
@@ -89,7 +56,7 @@ func (c *Client) EncWrite(plaintext []byte) (uint, error) {
 func (c *Client) DecRead() ([]byte, uint, error) {
 	enc, cnt, err := c.MiProxy.Read()
 	if cnt <= 0 || err != nil {
-		return []byte{}, 0, defErr.ConcatStr(err, `or read empty enc-bytes`)
+		return nil, 0, defErr.ConcatStr(err, `or read empty enc-bytes`)
 	}
 	dec, err := c.StreamCipher.DecryptFlow(enc)
 	return dec, cnt, err

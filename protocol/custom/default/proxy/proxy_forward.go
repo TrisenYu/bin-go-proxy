@@ -1,6 +1,6 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package proxy
+package protocol
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	defErr "bingoproxy/defErr"
-	protocol "bingoproxy/protocol"
+	customprotocol "bingoproxy/protocol/custom"
 	utils "bingoproxy/utils"
 )
 
@@ -18,7 +18,8 @@ type ClientControlMsg struct {
 	Remote []byte
 }
 
-// 	TODO：握手后全程都需要时间戳校验通信延迟吗？需不需要像 FTP 一样建立两条连接？一条数据连接，一条控制连接。
+// TODO：握手后全程都需要时间戳校验通信延迟吗？需不需要像 FTP 一样建立两条连接？一条数据连接，一条控制连接。
+
 /*
 	The first byte of control packet is defined as 0xAB or 0xCD.
 
@@ -53,38 +54,38 @@ resolve command
 		fatal or unexpected error should immediately abort connection.
 */
 func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
-	switch string(payload[:protocol.CMD_PAYLOAD_LEN]) {
+	switch string(payload[:customprotocol.CMD_PAYLOAD_LEN]) {
 	/* change sessionkey. Abort connection once unable to maintain encrypted connection.*/
-	case protocol.CMD_refresh_sessionkey:
-		if uint64(len(payload[protocol.CMD_PAYLOAD_LEN:])) != ep.KeyLen+ep.IvLen {
+	case customprotocol.CMD_refresh_sessionkey:
+		if uint64(len(payload[customprotocol.CMD_PAYLOAD_LEN:])) != ep.KeyLen+ep.IvLen {
 			return errors.New(`fatal error: malicious payload for altering key-iv`)
 		}
-		key_ed := protocol.CMD_PAYLOAD_LEN + uint(ep.KeyLen)
+		key_ed := customprotocol.CMD_PAYLOAD_LEN + uint(ep.KeyLen)
 		iv_ed := key_ed + uint(ep.IvLen)
-		ep.StreamCipher.SetKey(payload[protocol.CMD_PAYLOAD_LEN:key_ed])
+		ep.StreamCipher.SetKey(payload[customprotocol.CMD_PAYLOAD_LEN:key_ed])
 		ep.StreamCipher.SetIv(payload[key_ed:iv_ed])
-		_, err := ep.EncWrite2Client([]byte(protocol.HANDHLT))
+		_, err := ep.EncWrite2Client([]byte(customprotocol.HANDHLT))
 		if err != nil {
 			return defErr.StrConcat(`fatal error:`, err)
 		}
 		return errors.New(`info: jump out`)
 
-	case protocol.CMD_disconnect_with_ep:
-		ep.Client.CloseAll()
+	case customprotocol.CMD_disconnect_with_ep:
+		ep.Client.CloseConn()
 		if ep.Remote.Conn != nil {
-			ep.Remote.CloseAll()
+			ep.Remote.CloseConn()
 		}
 		return errors.New(`unique error: client proactive disconnect`)
 
-	case protocol.CMD_alter_aloof_server:
-		if len(payload[protocol.CMD_PAYLOAD_LEN:]) <= 4 {
+	case customprotocol.CMD_alter_aloof_server:
+		if len(payload[customprotocol.CMD_PAYLOAD_LEN:]) <= 4 {
 			return errors.New(`warning: invalid remote setting`)
 		}
 		var res ClientControlMsg
-		res.Rport = [2]byte(payload[protocol.CMD_PAYLOAD_LEN:protocol.CMD_RPORT_ED])
-		addrlen_int := utils.LittleEndianBytesToUint16([2]byte(payload[protocol.CMD_RPORT_ED:protocol.CMD_ADDR_ED]))
-		recheck_len := protocol.CMD_ADDR_ED + uint(addrlen_int)
-		res.Remote = payload[protocol.CMD_ADDR_ED:]
+		res.Rport = [2]byte(payload[customprotocol.CMD_PAYLOAD_LEN:customprotocol.CMD_RPORT_ED])
+		addrlen_int := utils.LittleEndianBytesToUint16([2]byte(payload[customprotocol.CMD_RPORT_ED:customprotocol.CMD_ADDR_ED]))
+		recheck_len := customprotocol.CMD_ADDR_ED + uint(addrlen_int)
+		res.Remote = payload[customprotocol.CMD_ADDR_ED:]
 		if uint(len(res.Remote)) != recheck_len {
 			return errors.New(`warning: malicious payload`)
 		}
@@ -96,29 +97,29 @@ func (ep *EncFlowProxy) controlTypeSelector(payload []byte) error {
 			        . <- .
 			What is the final solution ?
 		*/
-		_, err := ep.EncWrite2Client([]byte(protocol.RESP_recv_server_addrp)) // send ≠ acknowledge
+		_, err := ep.EncWrite2Client([]byte(customprotocol.RESP_recv_server_addrp)) // send ≠ acknowledge
 		if err != nil {
 			return defErr.StrConcat(`fatal error:`, err)
 		}
 		ep.remote_info = &res
 		return errors.New(`info: need jump out`)
 
-	case protocol.CMD_client_ready4_dual:
+	case customprotocol.CMD_client_ready4_dual:
 		if ep.remote_info == nil {
-			ep.EncWrite2Client([]byte(protocol.RESP_abort_the_operate))
+			ep.EncWrite2Client([]byte(customprotocol.RESP_abort_the_operate))
 			return errors.New(`internal error: 'remote_info' domain is still an empty CientControlMsg ptr`)
 		}
 
 		err := ep.TryConnRemote(ep.remote_info)
 		if err == nil {
-			_, err = ep.EncWrite2Client([]byte(protocol.RESP_server_acknowlege))
+			_, err = ep.EncWrite2Client([]byte(customprotocol.RESP_server_acknowlege))
 			if err != nil {
 				return defErr.StrConcat(`fatal error:`, err)
 			}
 			return nil
 		}
 		/* unable to connect to remote server */
-		_, err1 := ep.EncWrite2Client([]byte(protocol.RESP_fail2_conn2server))
+		_, err1 := ep.EncWrite2Client([]byte(customprotocol.RESP_fail2_conn2server))
 		if err1 != nil {
 			return defErr.StrConcat(`fatal error:`, err1)
 		}
@@ -167,7 +168,7 @@ func (ep *EncFlowProxy) CmdParser() error {
 	attr, ver := packet[0], packet[1]
 	nxt_len := utils.LittleEndianBytesToUint32([4]byte(packet[2:6]))
 
-	if ver != protocol.PROTOCOL_VERSION {
+	if ver != customprotocol.PROTOCOL_VERSION {
 		return errors.New(`fatal error: fraud version`)
 	}
 	if attr != 0xDC {
@@ -202,8 +203,8 @@ func (ep *EncFlowProxy) FlowForwarding() (error, error) {
 TODO: Test all of the logic.
 */
 func (ep *EncFlowProxy) Stage2Emulator() {
-	defer ep.Remote.CloseAll()
-	defer ep.Client.CloseAll()
+	defer ep.Remote.CloseConn()
+	defer ep.Client.CloseConn()
 recontrol:
 	if err := ep.CmdParser(); err != nil {
 		log.Println(err.Error())
@@ -228,7 +229,7 @@ recontrol:
 			return
 		}
 		if r2cerr != nil {
-			ep.Remote.CloseAll()
+			ep.Remote.CloseConn()
 			ep.EncWrite2Client(WrapWithHeader([]byte(`remote server error: `+r2cerr.Error()), 'F'))
 			goto recontrol // reset remote connect.
 		}

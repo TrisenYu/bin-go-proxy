@@ -6,3 +6,4 @@ experimental/
 *.txt
 .vscode/
 .dist/
+third-party/

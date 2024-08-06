@@ -1,15 +1,19 @@
 # SPDX-LICENSE-IDENTIFIER: GPL-2.0
 # (C) 2024 Author: <kisfg@hotmail.com>
 # THESE CODE ARE ONLY FOR PROOVING CONCEPT.
+"""
+	udp directly rushs to tcp: they are different except the port zone. Albeit the malicious attack is able to be 
+	theoretically launched from certain udp packet, the Ipv(4/6) provides `protocol` domain to ban the possibility.
+"""
 import socket, threading, time
 CURR_LOCALHOST = ("localhost", 3194)
-LOCK_ME = threading.Semaphore(1)
+SEMAPHORE = threading.Semaphore(1)
 
 
 def safely_print(payload: str) -> None:
-	LOCK_ME.acquire()
+	SEMAPHORE.acquire()
 	print(payload)
-	LOCK_ME.release()
+	SEMAPHORE.release()
 
 
 def tcp_try_hack() -> None:
@@ -23,7 +27,7 @@ def tcp_try_hack() -> None:
 		tcp.close()
 	except Exception as ef:
 		safely_print(f"tcp_try_hack: we catch an err: {ef}")
-
+		tcp.close()
 
 def normal_udp_server() -> None:
 	udp_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

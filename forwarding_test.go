@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	client "bingoproxy/client"
-	cryptoprotect "bingoproxy/cryptoProtect"
-	protocol "bingoproxy/protocol"
-	proxy "bingoproxy/proxy"
+	protocol "bingoproxy/protocol/custom"
+	client "bingoproxy/protocol/custom/default/client"
+	proxy "bingoproxy/protocol/custom/default/proxy"
 )
+
+// TODO: adjust to
 
 func TestForwarding(t *testing.T) {
 	log.Println(`Begin forwarding test`)
@@ -21,14 +22,9 @@ func TestForwarding(t *testing.T) {
 		c  client.Client
 	)
 
-	c.InitChannel()
-	ep.InitChannel()
-	defer ep.DeleteChannel()
-	defer c.DeleteChannel()
-
 	ch_listen, ch_conn := make(chan net.Listener, 1), make(chan net.Conn, 1)
 	ch_client := make(chan net.Conn, 1)
-	ch_err := make(chan [2]error)
+	server_done, client_done := make(chan bool, 1), make(chan bool, 1)
 
 	go func() {
 		dial, err := net.Dial("tcp6", "[::1]:9971")
@@ -60,40 +56,52 @@ func TestForwarding(t *testing.T) {
 	ep.Client.Conn = <-ch_conn
 	listener := <-ch_listen
 
-	defer ep.Client.CloseAll()
-	defer c.MiProxy.CloseAll()
+	defer ep.Client.CloseConn()
+	defer c.MiProxy.CloseConn()
 	defer listener.Close()
-	go func() {
-		werr, rerr := ep.Shakehand()
-		ch_err <- [2]error{werr, rerr}
-		close(ch_err)
-	}()
-	time.Sleep(time.Millisecond)
-	cwerr, crerr := c.Shakehand()
-	if cwerr != nil {
-		t.Error(cwerr.Error())
-		return
+	type innerInterface interface {
+		Shakehand() (error, error)
 	}
-	if crerr != nil {
-		t.Error(crerr.Error())
-		return
+	foo := func(op *innerInterface, ch chan<- bool) {
+		defer close(ch)
+		werr, rerr := (*op).Shakehand()
+		if werr != nil {
+			ch <- false
+			log.Println(werr)
+			return
+		}
+		if rerr != nil {
+			ch <- false
+			log.Println(werr)
+			return
+		}
+		ch <- true
 	}
 
-	ep_err := <-ch_err
-	pwerr, prerr := ep_err[0], ep_err[1]
-	if pwerr != nil {
-		t.Error(pwerr.Error())
+	go func() {
+		var tmp innerInterface = &ep
+		foo(&tmp, server_done)
+	}()
+	go func() {
+		time.Sleep(time.Millisecond)
+		var tmp innerInterface = &c
+		foo(&tmp, client_done)
+	}()
+
+	ep_err, c_err := <-server_done, <-client_done
+	if !ep_err {
+		t.Error(`proxy failed`)
 		return
 	}
-	if prerr != nil {
-		t.Error(prerr.Error())
+	if !c_err {
+		t.Error(`client failed`)
 		return
 	}
 
 	log.Println(`End of shakehand.`)
 
 	go func() {
-		key, iv, err := cryptoprotect.GeneratePresessionKey(c.StreamCipher)
+		key, iv, err := protocol.GeneratePresessionKey(c.StreamCipher)
 		if err != nil {
 			t.Error(err.Error())
 		}

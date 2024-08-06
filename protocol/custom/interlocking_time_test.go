@@ -8,7 +8,7 @@ import (
 
 func TestTimeStampSub(t *testing.T) {
 	// Judge by observing and comparing
-	now := []byte(`2024-10-09 23:59:58.233666`)
+	now := []byte(`2024-10-09 11:59:58.233666`)
 	jiffy := []byte(`2024-10-09 23:59:59.315999`)
 	TimeStampMinus(jiffy, now)
 

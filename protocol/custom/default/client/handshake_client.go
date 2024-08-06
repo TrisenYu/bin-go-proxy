@@ -1,9 +1,9 @@
 // SPDX-LICENSE-IDENTIFIER: GPL-2.0-Only
 // (C) 2024 Author: <kisfg@hotmail.com>
-package client
+package protocol
 
 import (
-	"crypto/rand"
+	crand "crypto/rand"
 	"errors"
 	"time"
 
@@ -14,8 +14,8 @@ import (
 	streamciphers "bingoproxy/cryptoProtect/streamCiphers"
 	zipper "bingoproxy/cryptoProtect/zipper"
 	defErr "bingoproxy/defErr"
-	protocol "bingoproxy/protocol"
-	service "bingoproxy/service"
+	custom "bingoproxy/protocol/custom"
+	service "bingoproxy/service/pingTimer"
 	utils "bingoproxy/utils"
 )
 
@@ -24,7 +24,7 @@ invoke this after gaining the proxy pubkey.
 
 	serialize the handshake-msg into bytes and encrypt with proxy's pubkey.
 */
-func (c *Client) pPubEncryptHandShakeMsg(handshake *protocol.HandShakeMsg) ([]byte, error) {
+func (c *Client) pPubEncryptHandShakeMsg(handshake *custom.HandShakeMsg) ([]byte, error) {
 	serialization := make([]byte, 0)
 	serialization = append(serialization, utils.Uint64ToLittleEndianBytes(handshake.Nonce)...)
 	serialization = append(serialization, handshake.Kern...)
@@ -36,28 +36,28 @@ func (c *Client) pPubEncryptHandShakeMsg(handshake *protocol.HandShakeMsg) ([]by
 }
 
 /* invoke this after generating pubkey */
-func (c *Client) generateRN() (*protocol.HandShakeMsg, error) {
+func (c *Client) generateRN() (*custom.HandShakeMsg, error) {
 	var (
 		nonce_ed uint64 = 8 // nonce is defined as 8 bytes
 		iv_ed           = nonce_ed + c.KeyLen + c.IvLen
 	)
 	rn := make([]byte, iv_ed-nonce_ed)
-	_, err := rand.Reader.Read(rn)
+	_, err := crand.Reader.Read(rn)
 	if err != nil {
 		return nil, err
 	}
-	nonceIn64, nonce, err := protocol.GenerateRandUint64WithByteRepresentation()
+	nonceIn64, nonce, err := custom.GenerateRandUint64WithByteRepresentation()
 	if err != nil {
 		return nil, err
 	}
 
-	timeStamp := []byte(protocol.SafeResetLen())
+	timeStamp := []byte(custom.SafeResetLen())
 	kern := []byte(nonce)
 	kern = append(kern, rn...)
 	kern = append(kern, timeStamp...)
 
 	var (
-		hasher    = c.HashCipher.CalculateHash(kern)
+		hasher    = c.HashCipher.CalculateHashOnce(kern)
 		signature = make([]byte, c.AsymmCipher.GetSignatureLen())
 	)
 	_signature, err := c.AsymmCipher.PemSign(hasher)
@@ -65,7 +65,7 @@ func (c *Client) generateRN() (*protocol.HandShakeMsg, error) {
 		return nil, err
 	}
 	copy(signature, _signature)
-	client_hello := protocol.HandShakeMsg{
+	client_hello := custom.HandShakeMsg{
 		Nonce:     nonceIn64,
 		Kern:      rn,
 		Hasher:    hasher,
@@ -76,18 +76,18 @@ func (c *Client) generateRN() (*protocol.HandShakeMsg, error) {
 }
 
 // Hard-encode HandShakeMsg.
-func (c *Client) extractHandShakeMsg(msg []byte) (*protocol.HandShakeMsg, error) {
+func (c *Client) extractHandShakeMsg(msg []byte) (*custom.HandShakeMsg, error) {
 	var (
 		nonce_ed uint64 = 8 // nonce is defined as 8 bytes
 		iv_ed           = nonce_ed + c.KeyLen + c.IvLen
 		hash_ed         = iv_ed + c.HashCipher.GetHashLen()
 		sign_ed         = hash_ed + c.AsymmCipher.GetSignatureLen()
 	)
-	if uint64(len(msg))-sign_ed != protocol.SafeReadTimeLen() {
-		return &protocol.HandShakeMsg{}, errors.New(protocol.PROXY_FAKE_HANDSHAKE)
+	if uint64(len(msg)) != custom.SafeReadTimeLen()+sign_ed {
+		return &custom.HandShakeMsg{}, errors.New(custom.PROXY_FAKE_HANDSHAKE)
 	}
 
-	var handshakemsg protocol.HandShakeMsg = protocol.HandShakeMsg{
+	var handshakemsg custom.HandShakeMsg = custom.HandShakeMsg{
 		Nonce:     utils.LittleEndianBytesToUint64([8]byte(msg[:nonce_ed])),
 		Kern:      msg[nonce_ed:iv_ed],
 		Hasher:    msg[iv_ed:hash_ed],
@@ -144,17 +144,17 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 	case `aes-gcm-256`: // not recommanded?
 		choice |= uint32(cryptoprotect.PICK_AES_GCM_256) << 8
 		c.StreamCipher = &streamciphers.AES_GCM_256{}
-	case `sm4-ofb-256`:
+	case `sm4-ofb-128`:
 		choice |= uint32(cryptoprotect.PICK_SM4_OFB_128) << 8
 		c.StreamCipher = &streamciphers.SM4_OFB{}
-	case `sm4-ctr-256`:
+	case `sm4-ctr-128`:
 		choice |= uint32(cryptoprotect.PICK_SM4_CTR_128) << 8
 		c.StreamCipher = &streamciphers.SM4_CTR{}
-	case `sm4-gcm-256`:
+	case `sm4-gcm-128`:
 		choice |= uint32(cryptoprotect.PICK_SM4_GCM_128) << 8
 		c.StreamCipher = &streamciphers.SM4_GCM{}
 	case `chacha20poly1305`:
-		choice |= uint32(cryptoprotect.PICK_CHACHA20POLY1305_256) << 8
+		choice |= uint32(cryptoprotect.PICK_CHACHA20POLY_256) << 8
 		c.StreamCipher = &streamciphers.Chacha20poly1305{}
 	case `zuc`:
 		fallthrough
@@ -196,7 +196,6 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 	case `blake2b512`:
 		choice |= uint32(cryptoprotect.PICK_BLAKE2B512) << 16
 		c.HashCipher = &hashciphers.Blake2b512{}
-
 	case `sm3`:
 		fallthrough
 	default:
@@ -212,7 +211,7 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 		fallthrough
 	default:
 		choice |= uint32(cryptoprotect.PICK_NULL_COMP) << 24
-		c.CompOption = &zipper.IdCompress{}
+		c.CompOption = &zipper.IdCompresser{}
 	}
 	/* payload: {choice||token} */
 	res := make([]byte, 4+len(access_token))
@@ -229,40 +228,39 @@ func (c *Client) SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, a
 // step 1 wait for PPUB
 func (c *Client) readStep1() error {
 	shutdown := func() {
-		c.wNeedBytes <- []byte{}
-		c.MiProxy.CloseAll()
+		c.wNeedBytes <- nil
+		c.MiProxy.CloseConn()
 	}
 	ppub, _, err := c.MiProxy.Read()
 	if err != nil {
 		shutdown()
-		return defErr.StrConcat(protocol.FAILED_TO_RECV_COMPRESSED_PPUB, err)
+		return defErr.StrConcat(custom.RECV_COMP_PPUB_FAILURE, err)
 	}
 	dep, err := c.CompOption.DecompressMsg(ppub)
 	if err != nil {
 		shutdown()
 		return err
 	}
-	c.wNeedBytes <- dep
+	c.wNeedBytes <- &dep
 	return nil
 }
 
 // step 1 ack PPUB
 func (c *Client) writeStep1() error {
 	ppub := <-c.wNeedBytes
-	if uint64(len(ppub)) != c.AsymmCipher.GetPubLen() {
-		c.MiProxy.CloseAll()
-		return errors.New(protocol.INVALID_PPUB_LENGTH)
+	if ppub == nil || uint64(len(*ppub)) != c.AsymmCipher.GetPubLen() {
+		c.MiProxy.CloseConn()
+		return errors.New(custom.INVALID_PPUB_LENGTH)
 	}
 
 	c.ProxyAsymmCipher.SetPub(ppub)
-	// time.Sleep(time.Microsecond * 500)
-
-	now, res := protocol.AckToTimestampHash(c.HashCipher, []byte(protocol.ACKPPUB))
+	now, res := custom.AckToTimestampHash(c.HashCipher, []byte(custom.ACKPPUB))
 	// TODO: compress the ack-pub?
 	cnt, err := c.MiProxy.Write(append(now, res...))
-	if uint64(cnt) != protocol.SafeGainTimestampHashLen() || err != nil {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_SEND_ACKPPUB, err)
+	currLen := custom.SafeGainTimestampHashLen()
+	if uint64(cnt) != currLen || err != nil {
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.SEND_ACKPPUB_FAILURE, err)
 	}
 	return nil
 }
@@ -270,20 +268,19 @@ func (c *Client) writeStep1() error {
 // step 2 wait for ack CPUB
 func (c *Client) readStep2() error {
 	ackcpub, _, err := c.MiProxy.Read()
-	if !protocol.AckFlowValidation(
-		c.HashCipher, ackcpub, []byte(protocol.ACKCPUB),
+	if !custom.AckFlowValidator(
+		c.HashCipher, ackcpub, []byte(custom.ACKCPUB),
 		c.ackTimCheck, &c.ackRec, c.pingRef, false) {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_VALIDATE_ACKCPUB, err)
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.INVALID_ACKCPUB, err)
 	}
 	return nil
 }
 
 // step 2 send CPUB
 func (c *Client) writeStep2() error {
-	// time.Sleep(time.Microsecond * 500)
 	if err := c.sendPub(); err != nil {
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return err
 	}
 	return nil
@@ -291,31 +288,35 @@ func (c *Client) writeStep2() error {
 
 // step3 send and wait for ack of cflow1 | cflow2
 func (c *Client) writeStep3(cflow []byte, turn int) error {
-	time.Sleep(time.Microsecond * 500)
+	time.Sleep(time.Microsecond * 10)
 	// TODO: time sensitive and can we use another way to fend off side-channel attack?
 	cf, err := c.CompOption.CompressMsg(cflow)
 	if err != nil {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_COMPRESS_CFLOW, err)
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.COMPRESS_CFLOW_FAILURE, err)
 	}
 	cnt, err := c.MiProxy.Write(cf)
 	if err != nil || cnt != uint(len(cf)) {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_SEND_COMPRESSED_CFLOW, err)
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.SEND_COMP_CFLOW_FAILURE, err)
 	}
 	cack := <-c.wNeedBytes
+	if cack == nil {
+		c.MiProxy.CloseConn()
+		return errors.New(`unable to gain cflow`)
+	}
 	var choice []byte
 	switch turn {
 	case 1:
-		choice = []byte(protocol.ACKCPK1)
+		choice = []byte(custom.ACKCPK1)
 	case 2:
-		choice = []byte(protocol.ACKCPK2)
+		choice = []byte(custom.ACKCPK2)
 	default:
-		return errors.New(protocol.C_PREFIX + protocol.BILATERY_INVALID_ACKCFLOW)
+		return errors.New(custom.C_PREFIX + custom.BI_INVALID_ACKCFLOW)
 	}
-	if !protocol.AckFlowValidation(c.HashCipher, cack, choice, c.ackTimCheck, &c.ackRec, c.pingRef, true) {
-		c.MiProxy.CloseAll()
-		return errors.New(protocol.FAILED_TO_PARSE_ACKCFLOW)
+	if !custom.AckFlowValidator(c.HashCipher, *cack, choice, c.ackTimCheck, &c.ackRec, c.pingRef, true) {
+		c.MiProxy.CloseConn()
+		return errors.New(custom.PARSE_ACKCFLOW_FAILURE)
 	}
 	return nil
 }
@@ -323,13 +324,13 @@ func (c *Client) writeStep3(cflow []byte, turn int) error {
 // step3 wait for ackcflow1 | ackcflow2
 func (c *Client) readStep3() error {
 	ackcpk, cnt, err := c.MiProxy.Read()
-	currLen := protocol.SafeGainTimestampHashLen()
+	currLen := custom.SafeGainTimestampHashLen()
 	if uint64(cnt) != currLen || err != nil {
-		c.wNeedBytes <- []byte{}
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_PARSE_ACKCFLOW, err)
+		c.wNeedBytes <- nil
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.PARSE_ACKCFLOW_FAILURE, err)
 	}
-	c.wNeedBytes <- ackcpk
+	c.wNeedBytes <- &ackcpk
 	return nil
 }
 
@@ -338,21 +339,21 @@ func (c *Client) writeStep4(turn int) error {
 	var choice []byte
 	switch turn {
 	case 1:
-		choice = []byte(protocol.ACKPPK1)
+		choice = []byte(custom.ACKPPK1)
 	case 2:
-		choice = []byte(protocol.ACKPPK2)
+		choice = []byte(custom.ACKPPK2)
 	default:
-		return errors.New(protocol.C_PREFIX + protocol.BILATERY_INVALID_ACKPFLOW)
+		return errors.New(custom.C_PREFIX + custom.BI_INVALID_ACKPFLOW)
 	}
 	if !<-c.rDoneSignal {
-		c.MiProxy.CloseAll()
-		return errors.New(protocol.C_PREFIX + protocol.BILATERY_INNER_SIGNAL_FAILED)
+		c.MiProxy.CloseConn()
+		return errors.New(custom.C_PREFIX + custom.BI_INNER_SIGNAL_FAILED)
 	}
-	now, res := protocol.AckToTimestampHash(c.HashCipher, choice)
+	now, res := custom.AckToTimestampHash(c.HashCipher, choice)
 	cnt, err := c.MiProxy.Write(append(now, res...))
-	if uint64(cnt) != protocol.SafeGainTimestampHashLen() || err != nil {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.FAILED_TO_SEND_ACKPFLOW, err)
+	if uint64(cnt) != custom.SafeGainTimestampHashLen() || err != nil {
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.SEND_ACKPFLOW_FAILURE, err)
 	}
 	return nil
 }
@@ -361,7 +362,7 @@ func (c *Client) writeStep4(turn int) error {
 func (c *Client) readStep4() ([]byte, error) {
 	shutdown := func(err error) ([]byte, error) {
 		c.rDoneSignal <- false
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return []byte{}, err
 	}
 	pf, _, err := c.MiProxy.Read()
@@ -376,47 +377,47 @@ func (c *Client) readStep4() ([]byte, error) {
 	return pflow, nil
 }
 
-func (c *Client) pflowConcatAndDecrypt(pflow1, pflow2 []byte) (*protocol.HandShakeMsg, error) {
+func (c *Client) pflowConcatAndDecrypt(pflow1, pflow2 []byte) (*custom.HandShakeMsg, error) {
 	enc_flow := append(pflow1, pflow2...)
 	flow, err := c.AsymmCipher.PemDecrypt(enc_flow)
 	if err != nil {
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return nil, defErr.StrConcat(
-			protocol.C_PREFIX+protocol.BILATERY_PEM_DECRYPTION_FAILED,
+			custom.C_PREFIX+custom.BI_BAD_PEM_DECRYPTION,
 			err)
 	}
 	presessionkey, err := c.extractHandShakeMsg(flow)
 	if err != nil {
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return nil, err
 	}
 	return presessionkey, nil
 }
 
 // step 9: verify sign and check hash
-func (c *Client) recheckHash(presessionkey *protocol.HandShakeMsg) error {
+func (c *Client) recheckHash(presessionkey *custom.HandShakeMsg) error {
 	verified := c.ProxyAsymmCipher.PubVerify(presessionkey.Hasher, presessionkey.Signature)
 	if !verified {
-		c.MiProxy.CloseAll()
-		return errors.New(protocol.BILATERY_SIGNATURE_FAILURE)
+		c.MiProxy.CloseConn()
+		return errors.New(custom.BI_SIGNATURE_FAILURE)
 	}
 	hashX := utils.Uint64ToLittleEndianBytes(presessionkey.Nonce)
 	hashX = append(hashX, presessionkey.Kern...)
 	hashX = append(hashX, presessionkey.Timestamp...)
-	recheck_hash := c.HashCipher.CalculateHash(hashX)
-	status, descript := utils.CompareByteSliceEqualOrNot(recheck_hash, presessionkey.Hasher)
+	recheck_hash := c.HashCipher.CalculateHashOnce(hashX)
+	status, descript := utils.CmpByte2Slices(recheck_hash, presessionkey.Hasher)
 	if !status {
-		c.MiProxy.CloseAll()
-		return errors.New(protocol.C_PREFIX + protocol.BILATERY_HASH_ACK_FAILURE + descript)
+		c.MiProxy.CloseConn()
+		return errors.New(custom.C_PREFIX + custom.BI_HASH_ACK_FAILURE + descript)
 	}
 	return nil
 }
 
 // step 10: generate sessionKey and wait for rn
-func (c *Client) readChallenge(preKey *protocol.HandShakeMsg) error {
+func (c *Client) readChallenge(preKey *custom.HandShakeMsg) error {
 	rn := c.rn
 	keyIvLen := c.StreamCipher.GetKeyIvLen()
-	tmpKey := protocol.GenerateSessionKey(
+	tmpKey := custom.GenerateSessionKey(
 		[]byte(preKey.Kern[:c.KeyLen]),
 		rn.Kern,
 		rn.Nonce,
@@ -427,21 +428,21 @@ func (c *Client) readChallenge(preKey *protocol.HandShakeMsg) error {
 	c.StreamCipher.SetKey(tmpKey)
 	c.StreamCipher.SetIv(preKey.Kern[c.KeyLen:keyIvLen])
 	resp_rn, _, err := c.DecRead()
-	status, _ := utils.CompareByteSliceEqualOrNot(resp_rn, rn.Kern)
+	status, _ := utils.CmpByte2Slices(resp_rn, rn.Kern)
 	if !status {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.INCONSISTENCY_OF_RN, err)
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.RN_INCONSISTENCY, err)
 	}
 	return nil
 }
 
 func (c *Client) writeFinish() error {
-	curr, res := protocol.AckToTimestampHash(c.HashCipher, []byte(protocol.HANDHLT))
+	curr, res := custom.AckToTimestampHash(c.HashCipher, []byte(custom.HANDHLT))
 	cnt, err := c.EncWrite(append(curr, res...))
-	currLen := protocol.SafeGainTimestampHashLen() + c.StreamCipher.WithIvAttached()
+	currLen := custom.SafeGainTimestampHashLen() + c.StreamCipher.WithIvAttached()
 	if uint64(cnt) != currLen || err != nil {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.C_PREFIX+protocol.BILATERY_ACK_FINISHED_FAILURE, err)
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.C_PREFIX+custom.BI_ACK_FINISHED_FAILED, err)
 	}
 	return nil
 }
@@ -449,22 +450,22 @@ func (c *Client) writeFinish() error {
 // step 12 read finish
 func (c *Client) readFinish() error {
 	_finish, _, err := c.DecRead()
-	if !protocol.AckFlowValidation(
+	if !custom.AckFlowValidator(
 		c.HashCipher, _finish,
-		[]byte(protocol.HANDHLT),
-		c.ackTimCheck, &c.ackRec, c.pingRef, false) || err != nil {
-		c.MiProxy.CloseAll()
-		return defErr.StrConcat(protocol.C_PREFIX+protocol.BILATERY_ACK_FINISHED_FAILURE, err)
+		[]byte(custom.HANDHLT),
+		c.ackTimCheck,
+		&c.ackRec, c.pingRef, false) || err != nil {
+		c.MiProxy.CloseConn()
+		return defErr.StrConcat(custom.C_PREFIX+custom.BI_ACK_FINISHED_FAILED, err)
 	}
 	return nil
 }
 
 func (c *Client) shakeHandReadCoroutine() (rerr error) {
 	if !<-c.wNotifiedSignal {
-		rerr = errors.New(protocol.C_PREFIX + protocol.BILATERY_INVALID_HELLO)
+		rerr = errors.New(custom.C_PREFIX + custom.BI_INVALID_HELLO)
 		return
 	}
-
 	rerr = c.readStep1()
 	if rerr != nil {
 		return
@@ -513,7 +514,7 @@ func (c *Client) shakeHandWriteCoroutine() (werr error) {
 	if config.GlobalClientConfiguration == nil {
 		werr = errors.New(`configuration has not been set up`)
 		c.wNotifiedSignal <- false
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return
 	}
 	asym_cfg := config.GlobalClientConfiguration.Local.AsymmetricCipher
@@ -525,7 +526,7 @@ func (c *Client) shakeHandWriteCoroutine() (werr error) {
 	werr = c.SendClientHelloPayload(asym_cfg, flow_cfg, hash_cfg, zip_cfg, access_token)
 	if werr != nil {
 		c.wNotifiedSignal <- false
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return
 	}
 	c.wNotifiedSignal <- true
@@ -539,15 +540,15 @@ func (c *Client) shakeHandWriteCoroutine() (werr error) {
 	}
 	c.rn, werr = c.generateRN()
 	if werr != nil {
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return
 	}
 	enc_rn, err := c.pPubEncryptHandShakeMsg(c.rn)
 	if err != nil {
-		c.MiProxy.CloseAll()
+		c.MiProxy.CloseConn()
 		return
 	}
-	flow1, flow2 := utils.BytesSpliterInHalfChanceField(enc_rn)
+	flow1, flow2 := utils.BytesSplitInHalfChanceField(enc_rn)
 	werr = c.writeStep3(flow1, 1 /* send cflow1 */)
 	if werr != nil {
 		return
@@ -574,14 +575,12 @@ func (c *Client) shakeHandWriteCoroutine() (werr error) {
 
 func (c *Client) clientAddrSpliter() (string, string) {
 	domain := c.MiProxy.Conn.RemoteAddr().String()
-	pos := 0
-	for i := len(domain) - 1; i > 0; i-- {
-		if domain[i] == ':' {
-			pos = i
-			break
-		}
-	}
+	pos := utils.FindPosCutNetworkAddrPort(domain)
 	return domain[:pos], domain[pos:]
+}
+
+func (c *Client) checkChan() bool {
+	return c.rDoneSignal == nil || c.wNeedBytes == nil
 }
 
 /*
@@ -591,20 +590,29 @@ todo: `ping` is not the final silver bullet for network connectivity due to seve
 	Model-Free Adaptive Predictive Control... ?
 */
 func (c *Client) Shakehand() (werr error, rerr error) {
-	ip, _ := c.clientAddrSpliter()
+	if c.checkChan() {
+		c.initChannel()
+	}
+	defer c.DeleteChannel()
+	ip, _ /* port */ := c.clientAddrSpliter()
 	ping_ref, ok := service.PingWithoutPrint(ip, 3, 4, 5, 5)
 	if !ok {
-		werr = errors.New(protocol.BILATERY_FAILED_TO_PING)
-		rerr = errors.New(protocol.BILATERY_FAILED_TO_PING)
+		werr = errors.New(custom.BI_FAILED_TO_PING)
+		rerr = errors.New(custom.BI_FAILED_TO_PING)
 		return
 	}
 	c.pingRef = ping_ref
-	functor := func() { c.ackTimCheck, c.ackRec = new([8][]byte), 0 }
+
 	wch, rch := make(chan error), make(chan error)
-	functor()
-	defer functor()
+	c.ackTimCheck, c.ackRec = new([8][]byte), 0
+
+	defer func() {
+		c.ackRec, c.ackTimCheck = 0, nil
+		c.rn = nil
+	}()
 	go func() { rch <- c.shakeHandReadCoroutine(); close(rch) }()
 	go func() { wch <- c.shakeHandWriteCoroutine(); close(wch) }()
 	werr, rerr = <-wch, <-rch
+
 	return
 }

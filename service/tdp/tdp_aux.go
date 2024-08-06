@@ -37,9 +37,3 @@ func FillHeader(
 	a = append(a, seed[:]...)
 	return a
 }
-
-func (tdp *TDPControlBlock) generateSeed() {
-}
-
-func (tdp *TDPControlBlock) copySeed() {
-}

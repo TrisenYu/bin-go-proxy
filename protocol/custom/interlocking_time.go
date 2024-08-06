@@ -104,7 +104,7 @@ func SafeSetTimeFromTimeStamp(inp time.Time) {
 // hash(timestamp + ack)[:CHOPPING_LENGTH_OF_HASH_VAL] => send with timestamp as current ack
 func AckToTimestampHash(hash_fn cryptoprotect.HashCipher, ack_payload []byte) (time_salt []byte, res []byte) {
 	time_salt = []byte(calibrated_time_accesser())
-	_res := hash_fn.CalculateHash(append(time_salt, ack_payload...))
+	_res := hash_fn.CalculateHashOnce(append(time_salt, ack_payload...))
 	res = _res[:CHOPPING_LENGTH_OF_HASH_VAL]
 	return
 }
@@ -116,9 +116,9 @@ func hasSaved(
 	ping_val int64,
 	hasCryptoBurden bool,
 ) bool {
-	flag1, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(ACKCPUB))
-	flag2, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(ACKPPUB))
-	flag3, _ := utils.CompareByteSliceEqualOrNot(stage_ack, []byte(HANDHLT))
+	flag1, _ := utils.CmpByte2Slices(stage_ack, []byte(ACKCPUB))
+	flag2, _ := utils.CmpByte2Slices(stage_ack, []byte(ACKPPUB))
+	flag3, _ := utils.CmpByte2Slices(stage_ack, []byte(HANDHLT))
 
 	if flag1 || flag2 {
 		*rec_cnt = 0
@@ -142,7 +142,7 @@ func hasSaved(
 	}
 
 	for idx := 0; idx < *rec_cnt; idx++ {
-		innerFlag, _ := utils.CompareByteSliceEqualOrNot(tmpTimeStamps[idx][:], checkTime[:])
+		innerFlag, _ := utils.CmpByte2Slices(tmpTimeStamps[idx][:], checkTime[:])
 		/*
 			check whether the timestamp has existed or not And
 			whether the timestamp violates the monotonically increasing order and
@@ -170,7 +170,7 @@ func hasSaved(
 }
 
 // validate if ack is up to standard by semantic consistency
-func AckFlowValidation(
+func AckFlowValidator(
 	hash_fn cryptoprotect.HashCipher,
 	ack_flow, stage_ack []byte,
 	tmpTimeStamps *[8][]byte,
@@ -190,8 +190,8 @@ func AckFlowValidation(
 	}
 	trunc_it := ack_flow[time_len:required_len]
 	time_salt = append(time_salt, stage_ack...)
-	check_it := hash_fn.CalculateHash(time_salt)
-	flag, _ := utils.CompareByteSliceEqualOrNot(check_it[:CHOPPING_LENGTH_OF_HASH_VAL], trunc_it)
+	check_it := hash_fn.CalculateHashOnce(time_salt)
+	flag, _ := utils.CmpByte2Slices(check_it[:CHOPPING_LENGTH_OF_HASH_VAL], trunc_it)
 	return flag
 }
 

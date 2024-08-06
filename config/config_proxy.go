@@ -46,11 +46,11 @@ func ParseProxyYAML(path string) *ProxyCommunicationConfig {
 	return GlobalProxyConfiguration
 }
 
+// we provide a default configuration, user can reset the configuratoin after initiation.
 func init() {
 	grandpa_dir, err := utils.GetFilePath(default_client_path)
 	if err != nil {
 		return // keep nil.
 	}
-	// we provide a default configuration, user can reset the configuratoin after initiation.
 	ParseProxyYAML(grandpa_dir + `/config/` + default_proxy_path)
 }

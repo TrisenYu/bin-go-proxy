@@ -2,8 +2,6 @@
 // (C) 2024 Author: <kisfg@hotmail.com>
 package cryptoprotect
 
-import "crypto/rand"
-
 type AsymmCipher interface {
 	// Generate key pair for certain instance.
 	GenerateKeyPair()
@@ -66,8 +64,23 @@ type StreamCipher interface {
 }
 
 type HashCipher interface {
-	GetHashLen() uint64              // return the length of hash.
-	CalculateHash(msg []byte) []byte // .not for file.
+	// return the length of hash.
+	GetHashLen() uint64
+
+	// calculate the hash of byteSlices, this method is not for file.
+	CalculateHashOnce(msg []byte) []byte
+
+	/*
+		New a hasher for calculating the hash of one file.
+		if the hasher is not nil, reset the hasher.
+	*/
+	NewHasher()
+
+	// return the final hash of certain file.
+	AggregatedHash() []byte
+
+	// accumulate for byte stream.
+	Accumulate(msg []byte) (cnt int, err error)
 }
 
 type CompOption interface {
@@ -82,17 +95,4 @@ type CompOption interface {
 
 	// decompress message.
 	DecompressMsg(msg []byte) ([]byte, error)
-}
-
-func GeneratePresessionKey(currCipher StreamCipher) ([]byte, []byte, error) {
-	key := make([]byte, currCipher.GetKeyLen())
-	if _, err := rand.Read(key); err != nil {
-		return nil, nil, err
-	}
-
-	iv := make([]byte, currCipher.GetIvLen())
-	if _, err := rand.Read(iv); err != nil {
-		return nil, nil, err
-	}
-	return key, iv, nil
 }

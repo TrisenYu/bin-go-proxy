@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	service "bingoproxy/service"
 	utils "bingoproxy/utils"
 )
 
@@ -503,7 +504,7 @@ func (tdp *TDPControlBlock) bitsIdentifier(
 			return
 		}
 		// 电脑上都有防火墙，如果借助 ping 来探查，先前定的握手协议
-		ping_ref, valid := PingWithoutPrint(fresh_addr.String(), 2, 8, 8, 5)
+		ping_ref, valid := service.PingWithoutPrint(fresh_addr.String(), 2, 8, 8, 5)
 		if !valid {
 			/* the validation of accessibility. */
 			shouldSkip = true
