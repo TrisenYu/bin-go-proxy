@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	service "bingoproxy/service"
+	service "bingoproxy/service/pingTimer"
 	utils "bingoproxy/utils"
 )
 
